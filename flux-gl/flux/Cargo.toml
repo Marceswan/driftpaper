@@ -12,7 +12,7 @@ build = "build.rs"
 
 [dependencies]
 bytemuck.workspace = true
-crevice = { version  = "0.16", features = [ "std", "nalgebra" ] }
+crevice = { version  = "0.18", features = [ "std", "nalgebra" ] }
 getrandom.workspace = true
 glow.workspace = true
 half = { version = "2", features = ["bytemuck"] }

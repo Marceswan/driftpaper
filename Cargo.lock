@@ -690,25 +690,25 @@ dependencies = [
 
 [[package]]
 name = "crevice"
-version = "0.16.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30fe135406c91a9839100f4b69ff18dab4da1efbc18bd8e7493ca69a1809956c"
+checksum = "90133334859a096164c9ed6d899b0dc6dffbe0abca9662dea9c76d79c55cd356"
 dependencies = [
  "bytemuck",
  "crevice-derive",
  "mint",
- "nalgebra 0.32.6",
+ "nalgebra",
 ]
 
 [[package]]
 name = "crevice-derive"
-version = "0.10.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2320c07ceb3e491e2bd09ade90a91c29a42d9553f1bde60c945cb5c34958b26e"
+checksum = "669025c5d21a002274fa2a547be9da319ae8e678cf99a7e242ae5c785bcd6fa8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.104",
 ]
 
 [[package]]
@@ -920,7 +920,7 @@ dependencies = [
 
 [[package]]
 name = "flux"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "approx",
  "bytemuck",
@@ -939,7 +939,7 @@ dependencies = [
 
 [[package]]
 name = "flux-desktop"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "env_logger",
  "flux",
@@ -966,7 +966,7 @@ dependencies = [
  "image",
  "log",
  "mint",
- "nalgebra 0.33.2",
+ "nalgebra",
  "rand 0.9.2",
  "rand_pcg",
  "rand_seeder",
@@ -1005,7 +1005,7 @@ dependencies = [
 
 [[package]]
 name = "flux-wasm"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
@@ -1909,21 +1909,6 @@ dependencies = [
 
 [[package]]
 name = "nalgebra"
-version = "0.32.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b5c17de023a86f59ed79891b2e5d5a94c705dbe904a5b5c9c952ea6221b03e4"
-dependencies = [
- "approx",
- "mint",
- "num-complex",
- "num-rational",
- "num-traits",
- "simba 0.8.1",
- "typenum",
-]
-
-[[package]]
-name = "nalgebra"
 version = "0.33.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26aecdf64b707efd1310e3544d709c5c0ac61c13756046aaaba41be5c4f66a3b"
@@ -1935,7 +1920,7 @@ dependencies = [
  "num-complex",
  "num-rational",
  "num-traits",
- "simba 0.9.0",
+ "simba",
  "typenum",
 ]
 
@@ -2900,18 +2885,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9203b8055f63a2a00e2f593bb0510367fe707d7ff1e5c872de2f537b339e5410"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "simba"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "061507c94fc6ab4ba1c9a0305018408e312e17c041eb63bef8aa726fa33aceae"
-dependencies = [
- "approx",
- "num-complex",
- "num-traits",
- "paste",
 ]
 
 [[package]]
