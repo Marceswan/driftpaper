@@ -9,6 +9,8 @@
   packageJSON = builtins.fromJSON (builtins.readFile ./package.json);
   version = packageJSON.version;
 
+  wasm-bindgen = pkgs.wasm-bindgen-cli_0_2_104;
+
   # Prepare the wasm package the same way that wasm-pack does.
   # TODO: maybe do this in the flux-wasm build
   prepareWasm = wasmPkg:
@@ -33,7 +35,7 @@
     in
     pkgs.runCommand "flux-wasm" {} ''
       mkdir $out
-      ${lib.getExe pkgs.wasm-bindgen-cli_0_2_100} \
+      ${lib.getExe wasm-bindgen} \
         --target bundler \
         --out-name index \
         --out-dir $out \
@@ -61,7 +63,7 @@ in
       pnpm
       pnpm.configHook
       elmPackages.elm
-      wasm-bindgen-cli_0_2_100
+      wasm-bindgen
       binaryen
     ];
 
