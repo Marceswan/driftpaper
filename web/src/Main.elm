@@ -365,8 +365,8 @@ view model =
                     ]
                 , Html.li []
                     [ Html.a
-                        [ HA.href "https://twitter.com/sandy_doo/" ]
-                        [ Html.text "Follow me on Twitter" ]
+                        [ HA.href "https://x.com/sandydoo/" ]
+                        [ Html.text "Follow me on X" ]
                     ]
                 , Html.li []
                     [ Html.a
