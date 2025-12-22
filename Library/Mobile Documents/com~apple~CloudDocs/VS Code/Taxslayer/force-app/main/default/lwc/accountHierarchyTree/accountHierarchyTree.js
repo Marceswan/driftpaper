@@ -16,6 +16,9 @@ export default class AccountHierarchyTree extends NavigationMixin(LightningEleme
     error;
     isLoading = true;
     fieldLabels = {};
+    isAllExpanded = true;
+    allRowIds = [];
+    pathToCurrentAccount = [];
 
     get gridColumns() {
         return this.parseColumns();
@@ -28,6 +31,14 @@ export default class AccountHierarchyTree extends NavigationMixin(LightningEleme
     get errorMessage() {
         if (!this.error) return '';
         return this.error.body?.message || this.error.message || 'An error occurred';
+    }
+
+    get expandCollapseIcon() {
+        return this.isAllExpanded ? 'utility:collapse_all' : 'utility:expand_all';
+    }
+
+    get expandCollapseLabel() {
+        return this.isAllExpanded ? 'Collapse All' : 'Expand All';
     }
 
     get fieldNames() {
@@ -74,8 +85,47 @@ export default class AccountHierarchyTree extends NavigationMixin(LightningEleme
             this.error = undefined;
             this.currentAccountId = data.currentAccountId;
             this.treeData = this.transformToTreeData(data.nodes);
-            this.expandedRowIds = this.collectAllIds(this.treeData);
+            this.allRowIds = this.collectAllIds(this.treeData);
+            this.pathToCurrentAccount = this.findPathToCurrentAccount(this.treeData, this.currentAccountId);
+            this.expandedRowIds = [...this.allRowIds];
+            this.isAllExpanded = true;
         }
+    }
+
+    handleExpandCollapseToggle() {
+        if (this.isAllExpanded) {
+            // Collapse all except the path to current account
+            this.expandedRowIds = [...this.pathToCurrentAccount];
+            this.isAllExpanded = false;
+        } else {
+            // Expand all
+            this.expandedRowIds = [...this.allRowIds];
+            this.isAllExpanded = true;
+        }
+    }
+
+    findPathToCurrentAccount(nodes, targetId) {
+        if (!nodes || !targetId) return [];
+
+        // Recursive helper that returns null if not found, or array of ancestor IDs if found
+        const findPath = (nodeList, ancestorPath) => {
+            for (const node of nodeList) {
+                if (node.id === targetId) {
+                    // Found! Return the ancestor path (not including target itself)
+                    return ancestorPath;
+                }
+                if (node._children) {
+                    // Search children, adding current node to ancestor path
+                    const result = findPath(node._children, [...ancestorPath, node.id]);
+                    if (result !== null) {
+                        return result;
+                    }
+                }
+            }
+            return null; // Not found in this branch
+        };
+
+        return findPath(nodes, []) || [];
     }
 
     parseColumns() {
