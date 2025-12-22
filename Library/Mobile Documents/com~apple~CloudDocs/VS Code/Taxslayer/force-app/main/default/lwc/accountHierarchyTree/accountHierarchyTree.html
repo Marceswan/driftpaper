@@ -24,13 +24,15 @@
         <template if:false={isLoading}>
             <template if:false={error}>
                 <template if:true={hasData}>
-                    <lightning-tree-grid
-                        columns={gridColumns}
-                        data={treeData}
-                        key-field="id"
-                        expanded-rows={expandedRowIds}
-                        hide-checkbox-column>
-                    </lightning-tree-grid>
+                    <div class="tree-container" style={containerStyle}>
+                        <lightning-tree-grid
+                            columns={gridColumns}
+                            data={treeData}
+                            key-field="id"
+                            expanded-rows={expandedRowIds}
+                            hide-checkbox-column>
+                        </lightning-tree-grid>
+                    </div>
                 </template>
 
                 <template if:false={hasData}>

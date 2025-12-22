@@ -14,6 +14,10 @@
                       label="Columns"
                       description="Comma-separated field API names (e.g., Name,Industry,AnnualRevenue) or JSON array of column definitions"
                       default="Name,Industry,AnnualRevenue"/>
+            <property name="maxHeight" type="String"
+                      label="Max Height"
+                      description="Maximum height before scrolling (e.g., 50vh, 400px, 100%). Leave empty for no limit."
+                      default="50vh"/>
         </targetConfig>
     </targetConfigs>
 </LightningComponentBundle>
