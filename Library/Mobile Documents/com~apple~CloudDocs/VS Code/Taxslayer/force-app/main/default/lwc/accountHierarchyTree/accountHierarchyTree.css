@@ -1,0 +1,14 @@
+/* Highlight for current account row */
+:host {
+    --slds-c-tree-item-background-color-active: var(--slds-g-color-success-base-30, #cdefc4);
+}
+
+/* Apply success theme to current account cells */
+.slds-theme_success {
+    background-color: var(--slds-g-color-success-base-30, #cdefc4) !important;
+}
+
+/* Ensure tree grid takes full width */
+lightning-tree-grid {
+    display: block;
+}

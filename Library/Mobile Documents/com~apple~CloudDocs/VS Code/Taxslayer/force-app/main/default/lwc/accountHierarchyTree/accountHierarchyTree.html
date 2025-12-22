@@ -1,0 +1,36 @@
+<template>
+    <lightning-card title="Account Hierarchy" icon-name="standard:hierarchy">
+        <template if:true={isLoading}>
+            <div class="slds-is-relative slds-p-around_large">
+                <lightning-spinner alternative-text="Loading..." size="medium"></lightning-spinner>
+            </div>
+        </template>
+
+        <template if:true={error}>
+            <div class="slds-p-around_medium slds-text-color_error">
+                <lightning-icon icon-name="utility:error" alternative-text="Error" size="small" class="slds-m-right_x-small"></lightning-icon>
+                {errorMessage}
+            </div>
+        </template>
+
+        <template if:false={isLoading}>
+            <template if:false={error}>
+                <template if:true={hasData}>
+                    <lightning-tree-grid
+                        columns={gridColumns}
+                        data={treeData}
+                        key-field="id"
+                        expanded-rows={expandedRowIds}
+                        hide-checkbox-column>
+                    </lightning-tree-grid>
+                </template>
+
+                <template if:false={hasData}>
+                    <div class="slds-p-around_medium slds-text-align_center slds-text-color_weak">
+                        No hierarchy data available
+                    </div>
+                </template>
+            </template>
+        </template>
+    </lightning-card>
+</template>
