@@ -1,5 +1,7 @@
 import { LightningElement, api, wire } from 'lwc';
 import { NavigationMixin } from 'lightning/navigation';
+import { getObjectInfo } from 'lightning/uiObjectInfoApi';
+import ACCOUNT_OBJECT from '@salesforce/schema/Account';
 import getAccountHierarchy from '@salesforce/apex/AccountHierarchyController.getAccountHierarchy';
 
 const DEFAULT_COLUMNS = 'Name,Industry,AnnualRevenue';
@@ -13,6 +15,7 @@ export default class AccountHierarchyTree extends NavigationMixin(LightningEleme
     currentAccountId;
     error;
     isLoading = true;
+    fieldLabels = {};
 
     get gridColumns() {
         return this.parseColumns();
@@ -41,6 +44,20 @@ export default class AccountHierarchyTree extends NavigationMixin(LightningEleme
         }
 
         return this.columns.split(',').map(f => f.trim()).filter(Boolean);
+    }
+
+    @wire(getObjectInfo, { objectApiName: ACCOUNT_OBJECT })
+    wiredObjectInfo({ error, data }) {
+        if (data) {
+            // Build map of field API name to label
+            const fields = data.fields;
+            this.fieldLabels = {};
+            Object.keys(fields).forEach(fieldName => {
+                this.fieldLabels[fieldName] = fields[fieldName].label;
+            });
+        } else if (error) {
+            console.error('Error loading Account object info:', error);
+        }
     }
 
     @wire(getAccountHierarchy, { recordId: '$recordId', fields: '$fieldNames' })
@@ -92,7 +109,7 @@ export default class AccountHierarchyTree extends NavigationMixin(LightningEleme
                 return {
                     type: 'url',
                     fieldName: 'recordUrl',
-                    label: this.formatLabel(field),
+                    label: this.getFieldLabel(field),
                     typeAttributes: {
                         label: { fieldName: field },
                         target: '_self'
@@ -106,7 +123,7 @@ export default class AccountHierarchyTree extends NavigationMixin(LightningEleme
             return {
                 type: 'text',
                 fieldName: field,
-                label: this.formatLabel(field),
+                label: this.getFieldLabel(field),
                 cellAttributes: {
                     class: { fieldName: 'rowClass' }
                 }
@@ -145,9 +162,15 @@ export default class AccountHierarchyTree extends NavigationMixin(LightningEleme
         });
     }
 
-    formatLabel(fieldName) {
+    getFieldLabel(fieldName) {
         if (!fieldName) return '';
-        // Convert camelCase or PascalCase to Title Case with spaces
+
+        // Use actual field label from schema if available
+        if (this.fieldLabels[fieldName]) {
+            return this.fieldLabels[fieldName];
+        }
+
+        // Fallback: Convert camelCase or PascalCase to Title Case with spaces
         return fieldName
             .replace(/([A-Z])/g, ' $1')
             .replace(/^./, str => str.toUpperCase())
@@ -161,11 +184,14 @@ export default class AccountHierarchyTree extends NavigationMixin(LightningEleme
             const record = {
                 id: node.id,
                 recordUrl: '/' + node.id,
-                rowClass: node.id === this.currentAccountId ? 'slds-theme_success' : '',
-                _children: node.children && node.children.length > 0
-                    ? this.transformToTreeData(node.children)
-                    : undefined
+                rowClass: node.id === this.currentAccountId ? 'slds-theme_success' : ''
             };
+
+            // Only add _children if there are actual children (prevents chevron on leaf nodes)
+            const hasChildren = node.children && Array.isArray(node.children) && node.children.length > 0;
+            if (hasChildren) {
+                record._children = this.transformToTreeData(node.children);
+            }
 
             // Flatten fields onto record
             if (node.fields) {
