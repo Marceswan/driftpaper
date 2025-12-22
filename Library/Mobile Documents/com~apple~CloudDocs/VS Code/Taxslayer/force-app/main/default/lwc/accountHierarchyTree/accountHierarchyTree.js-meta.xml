@@ -16,8 +16,8 @@
                       default="Name,Industry,AnnualRevenue"/>
             <property name="maxHeight" type="String"
                       label="Max Height"
-                      description="Maximum height before scrolling (e.g., 50vh, 400px, 100%). Leave empty for no limit."
-                      default="50vh"/>
+                      description="Maximum height before scrolling (e.g., 35vh, 400px, 100%). Leave empty for no limit."
+                      default="35vh"/>
         </targetConfig>
     </targetConfigs>
 </LightningComponentBundle>

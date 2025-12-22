@@ -9,7 +9,7 @@ const DEFAULT_COLUMNS = 'Name,Industry,AnnualRevenue';
 export default class AccountHierarchyTree extends NavigationMixin(LightningElement) {
     @api recordId;
     @api columns = DEFAULT_COLUMNS;
-    @api maxHeight = '50vh';
+    @api maxHeight = '35vh';
 
     treeData = [];
     expandedRowIds = [];
