@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Use_Metadata_API__c</fullName>
+    <defaultValue>false</defaultValue>
+    <description>When enabled, the FlexiPage migration process will use the Metadata API instead of the Tooling API for retrieving and deploying FlexiPage metadata</description>
+    <externalId>false</externalId>
+    <inlineHelpText>Enable this setting to use Metadata API for FlexiPage operations. When disabled (default), Tooling API will be used.</inlineHelpText>
+    <label>Use Metadata API</label>
+    <trackTrending>false</trackTrending>
+    <type>Checkbox</type>
+</CustomField>

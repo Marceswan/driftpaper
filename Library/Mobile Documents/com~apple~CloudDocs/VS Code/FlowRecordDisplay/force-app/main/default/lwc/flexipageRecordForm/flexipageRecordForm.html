@@ -1,0 +1,217 @@
+<template>
+    <lightning-card title={cardTitle} icon-name={objectIcon}>
+        <template if:true={isLoading}>
+            <lightning-spinner alternative-text="Loading" size="medium"></lightning-spinner>
+        </template>
+        <template if:false={isLoading}>
+            <div key={refreshKey}>
+                <template if:true={isReadOnly}>
+                <template if:true={isDataAvailable}>
+                <template for:each={sectionsWithKey} for:item="section">
+                    <section key={section.uniqueKey} class={section.class}>
+                        <div class="slds-section__title slds-m-bottom_x-small">
+                            <button aria-expanded={section.isOpen} class="slds-button slds-section__title-action" data-name={section.sectionName} onclick={toggleSection}>
+                                <svg class="slds-section__title-action-icon slds-button__icon slds-button__icon_left" aria-hidden="true">
+                                    <use xlink:href="/_slds/icons/utility-sprite/svg/symbols.svg#switch"></use>
+                                </svg>
+                                <span class="slds-truncate" title={section.sectionName}>{section.sectionName}</span>
+                            </button>
+                        </div>
+                        <div class="slds-section__content">
+                            <lightning-record-view-form record-id={recordId} object-api-name={objectApiName}>
+                                <div class="slds-grid slds-wrap">
+                                    <template for:each={section.columns} for:item="column">
+                                        <div key={column.columnId} class="slds-col slds-size_1-of-2 slds-p-horizontal_small">
+                                            <template if:true={column.enhancedFields} for:each={column.enhancedFields} for:item="field">
+                                                <div key={field.fieldId} class="slds-form-element slds-form-element_readonly slds-form-element_stacked">
+                                                    <template if:true={field.fieldData.isReference}>
+                                                        <span class="slds-form-element__label">{field.fieldData.label}</span>
+                                                        <div class="slds-form-element__control">
+                                                            <div class="slds-form-element__static">
+                                                                <template if:true={field.fieldData.value}>
+                                                                    <template if:true={field.fieldData.referenceNameValue}>
+                                                                        <a href={field.fieldData.recordUrl} 
+                                                                           onclick={navigateToRecord} 
+                                                                           data-record-id={field.fieldData.value}>
+                                                                            {field.fieldData.referenceNameValue}
+                                                                        </a>
+                                                                    </template>
+                                                                    <template if:false={field.fieldData.referenceNameValue}>
+                                                                        {field.fieldData.value}
+                                                                    </template>
+                                                                </template>
+                                                                <template if:false={field.fieldData.value}>
+                                                                    &nbsp;
+                                                                </template>
+                                                            </div>
+                                                        </div>
+                                                    </template>
+                                                    <template if:false={field.fieldData.isReference}>
+                                                        <span class="slds-form-element__label">{field.fieldData.label}</span>
+                                                        <div class="slds-form-element__control">
+                                                            <div class="slds-form-element__static">
+                                                                <template if:true={field.fieldData.isCheckbox}>
+                                                                    <span class="slds-checkbox slds-checkbox_stacked">
+                                                                        <input type="checkbox" 
+                                                                               id={field.fieldId} 
+                                                                               checked={field.fieldData.value} 
+                                                                               disabled="disabled" />
+                                                                        <label class="slds-checkbox__label" for={field.fieldId}>
+                                                                            <span class="slds-checkbox_faux"></span>
+                                                                        </label>
+                                                                    </span>
+                                                                </template>
+                                                                <template if:false={field.fieldData.isCheckbox}>
+                                                                    <template if:true={field.fieldData.value}>
+                                                                        <lightning-formatted-text value={field.fieldData.value}></lightning-formatted-text>
+                                                                    </template>
+                                                                    <template if:false={field.fieldData.value}>
+                                                                        &nbsp;
+                                                                    </template>
+                                                                </template>
+                                                            </div>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </template>
+                                            <template if:false={column.enhancedFields} for:each={column.fieldIds} for:item="fieldId">
+                                                <div key={fieldId} class="slds-form-element slds-form-element_readonly slds-form-element_stacked">
+                                                    <lightning-output-field field-name={fieldId}></lightning-output-field>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
+                            </lightning-record-view-form>
+                        </div>
+                    </section>
+                </template>
+            </template>
+            <template if:false={isDataAvailable}>
+                <c-stencil iterations="4" columns="2"></c-stencil>
+            </template>
+        </template>
+        <template if:false={isReadOnly}>
+            <template if:true={isDataAvailable}>
+                <template for:each={sectionsWithKey} for:item="section">
+                    <section key={section.uniqueKey} class={section.class}>
+                        <div class="slds-section__title slds-m-bottom_x-small">
+                            <button aria-expanded={section.isOpen} class="slds-button slds-section__title-action" data-name={section.sectionName} onclick={toggleSection}>
+                                <svg class="slds-section__title-action-icon slds-button__icon slds-button__icon_left" aria-hidden="true">
+                                    <use xlink:href="/_slds/icons/utility-sprite/svg/symbols.svg#switch"></use>
+                                </svg>
+                                <span class="slds-truncate" title={section.sectionName}>{section.sectionName}</span>
+                            </button>
+                        </div>
+                        <div if:false={editMode} class="slds-section__content">
+                            <lightning-record-view-form record-id={recordId} object-api-name={objectApiName}>
+                                <div class="slds-grid slds-wrap">
+                                    <template for:each={section.columns} for:item="column">
+                                        <div key={column.columnId} class="slds-col slds-size_1-of-2 slds-p-horizontal_small">
+                                            <template if:true={column.enhancedFields} for:each={column.enhancedFields} for:item="field">
+                                                <div key={field.fieldId} class="slds-form-element slds-form-element_readonly slds-form-element_stacked slds-form-element_edit">
+                                                    <template if:true={field.fieldData.isReference}>
+                                                        <span class="slds-form-element__label">{field.fieldData.label}</span>
+                                                        <div class="slds-form-element__control">
+                                                            <div class="slds-form-element__static slds-form-element__static_edit">
+                                                                <template if:true={field.fieldData.value}>
+                                                                    <template if:true={field.fieldData.referenceNameValue}>
+                                                                        <a href={field.fieldData.recordUrl} 
+                                                                           onclick={navigateToRecord} 
+                                                                           data-record-id={field.fieldData.value}>
+                                                                            {field.fieldData.referenceNameValue}
+                                                                        </a>
+                                                                    </template>
+                                                                    <template if:false={field.fieldData.referenceNameValue}>
+                                                                        {field.fieldData.value}
+                                                                    </template>
+                                                                </template>
+                                                                <template if:false={field.fieldData.value}>
+                                                                    &nbsp;
+                                                                </template>
+                                                                <template if:true={field.fieldData.isEditable}>
+                                                                    <lightning-button-icon icon-name="utility:edit" variant="bare" alternative-text="Edit"
+                                                                                           class="slds-float_right"
+                                                                                           onclick={handleEdit}></lightning-button-icon>
+                                                                </template>
+                                                            </div>
+                                                        </div>
+                                                    </template>
+                                                    <template if:false={field.fieldData.isReference}>
+                                                        <span class="slds-form-element__label">{field.fieldData.label}</span>
+                                                        <div class="slds-form-element__control">
+                                                            <div class="slds-form-element__static slds-form-element__static_edit">
+                                                                <template if:true={field.fieldData.isCheckbox}>
+                                                                    <span class="slds-checkbox slds-checkbox_stacked">
+                                                                        <input type="checkbox" 
+                                                                               id={field.fieldId} 
+                                                                               checked={field.fieldData.value} 
+                                                                               disabled="disabled" />
+                                                                        <label class="slds-checkbox__label" for={field.fieldId}>
+                                                                            <span class="slds-checkbox_faux"></span>
+                                                                        </label>
+                                                                    </span>
+                                                                </template>
+                                                                <template if:false={field.fieldData.isCheckbox}>
+                                                                    <template if:true={field.fieldData.value}>
+                                                                        <lightning-formatted-text value={field.fieldData.value}></lightning-formatted-text>
+                                                                    </template>
+                                                                    <template if:false={field.fieldData.value}>
+                                                                        &nbsp;
+                                                                    </template>
+                                                                </template>
+                                                                <template if:true={field.fieldData.isEditable}>
+                                                                    <lightning-button-icon icon-name="utility:edit" variant="bare" alternative-text="Edit"
+                                                                                           class="slds-float_right"
+                                                                                           onclick={handleEdit}></lightning-button-icon>
+                                                                </template>
+                                                            </div>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </template>
+                                            <template if:false={column.enhancedFields} for:each={column.fieldIds} for:item="fieldId">
+                                                <div key={fieldId} class="slds-form-element slds-form-element_readonly slds-form-element_stacked">
+                                                    <span key={fieldId} class="slds-grow slds-is-relative" style="min-height: 0.5rem;">
+                                                        <lightning-output-field field-name={fieldId}></lightning-output-field>
+                                                        <lightning-button-icon icon-name="utility:edit" variant="bare" alternative-text="Edit"
+                                                                               class="slds-button__icon_edit slds-float_right slds-m-right_x-small slds-m-bottom_xx-small"
+                                                                               onclick={handleEdit}></lightning-button-icon>
+                                                    </span>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
+                            </lightning-record-view-form>
+                        </div>
+                        <div if:true={editMode} class="slds-section__content">
+                            <lightning-record-edit-form record-id={recordId} object-api-name={objectApiName}>
+                                <div class="slds-grid slds-wrap">
+                                    <template for:each={section.columns} for:item="column">
+                                        <div key={column.columnId} class="slds-col slds-size_1-of-2 slds-p-horizontal_small">
+                                            <template for:each={column.fieldIds} for:item="fieldId">
+                                                <lightning-input-field key={fieldId} data-field-name={fieldId} field-name={fieldId} onchange={handleFieldChange}></lightning-input-field>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
+                            </lightning-record-edit-form>
+                        </div>
+                    </section>
+                </template>
+                <div if:false={flowContext} class="slds-m-top_medium slds-align_absolute-center">
+                    <div if:true={editMode}>
+                        <lightning-button class="slds-m-right_x-small" variant="neutral" label={cancelLabel} onclick={handleCancel}></lightning-button>
+                        <lightning-button class="slds-m-right_x-small" variant="brand" label={saveLabel} onclick={handleSave}></lightning-button>
+                    </div>
+                </div>
+            </template>
+            <template if:false={isDataAvailable}>
+                <c-stencil iterations="4" columns="2"></c-stencil>
+            </template>
+        </template>
+            </div>
+        </template>
+    </lightning-card>
+</template>

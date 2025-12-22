@@ -1,0 +1,75 @@
+/* Reduce spacing between form elements */
+.slds-form-element {
+    margin-bottom: 0.5rem;
+}
+
+/* Adjust section title spacing */
+.slds-section__title {
+    margin-bottom: 0.25rem;
+}
+
+/* Remove excessive padding from section content */
+.slds-section__content {
+    padding: 0;
+}
+
+/* Adjust column padding */
+.slds-col {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+}
+
+/* Reduce padding on form elements */
+.slds-form-element__control {
+    padding-top: 0;
+}
+
+/* Ensure proper spacing for stacked form elements */
+.slds-form-element_stacked .slds-form-element__label {
+    margin-bottom: 0.125rem;
+}
+
+/* Ensure output fields don't have excessive padding */
+lightning-output-field {
+    --sds-c-outputfield-spacing-block-start: 0.25rem;
+    --sds-c-outputfield-spacing-block-end: 0.25rem;
+}
+
+/* Adjust the overall card padding */
+lightning-card {
+    --sds-c-card-body-spacing-block-start: 0.5rem;
+    --sds-c-card-body-spacing-block-end: 0.5rem;
+    --sds-c-card-body-spacing-inline-start: 0.5rem;
+    --sds-c-card-body-spacing-inline-end: 0.5rem;
+}
+
+/* Ensure consistent field heights */
+.slds-form-element_readonly {
+    min-height: 1.875rem;
+}
+
+/* Remove bottom border that was adding extra space */
+.slds-border_bottom {
+    border-bottom: none;
+}
+
+/* Adjust gutters */
+.slds-gutters {
+    margin: -0.25rem;
+}
+
+.slds-gutters > .slds-col {
+    padding: 0.25rem;
+}
+
+/* Edit button alignment with field values */
+.slds-form-element_edit .slds-form-element__static_edit {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.slds-form-element_edit .slds-form-element__static_edit lightning-button-icon {
+    margin-left: 0.5rem;
+    flex-shrink: 0;
+}

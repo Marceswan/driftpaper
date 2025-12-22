@@ -1,0 +1,101 @@
+{
+  "mcpServers": {
+    "puppeteer": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-puppeteer"
+      ]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/marcswan/Desktop",
+        "/Users/marcswan/Library/Mobile Documents/com~apple~CloudDocs"
+      ]
+    },
+    "desktop-commander": {
+      "command": "npx",
+      "args": [
+        "@wonderwhy-er/desktop-commander@latest"
+      ]
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ]
+    },
+    "shadcn-ui-server": {
+      "command": "npx",
+      "args": ["@heilgar/shadcn-ui-mcp-server"]
+    },
+    "todoist": {
+            "command": "npx",
+            "args": ["-y", "todoist-mcp"],
+            "env": {
+                "API_KEY": "your_todoist_api_token_here"
+            }
+    },
+    "excel": {
+        "command": "npx",
+        "args": ["--yes", "@negokaz/excel-mcp-server"],
+        "env": {
+            "EXCEL_MCP_PAGING_CELLS_LIMIT": "4000"
+        }
+    },
+    "chroma": {
+      "command": "uvx",
+      "args": [
+        "chroma-mcp-server"
+      ],
+      "env": {
+        "CHROMA_CLIENT_TYPE": "persistent",
+        "CHROMA_DATA_DIR": "/Users/marcswan/Library/Mobile Documents/com~apple~CloudDocs/Chroma/data",
+        "CHROMA_LOG_DIR": "/Users/marcswan/Library/Mobile Documents/com~apple~CloudDocs/Chroma/logs",
+        "LOG_LEVEL": "INFO",
+        "MCP_LOG_LEVEL": "INFO",
+        "MCP_SERVER_LOG_LEVEL": "INFO"
+      }
+    },
+    "sqlite": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-sqlite",
+        "--db-path",
+        "/Users/marcswan/Library/Mobile Documents/com~apple~CloudDocs/VS Code/SwanLake/swanlake/database/database.sqlite"
+      ]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "env": {
+        "MCP_FETCH_MAX_REDIRECTS": "5",
+        "MCP_FETCH_USER_AGENT": "SwanLake/1.0"
+      }
+    },
+    "everything": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-everything"]
+    },
+    "git": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-git",
+        "--repository",
+        "/Users/marcswan/Library/Mobile Documents/com~apple~CloudDocs/VS Code/SwanLake/swanlake"
+      ]
+    }
+  },
+  "globalShortcut": "Ctrl+Space"
+}

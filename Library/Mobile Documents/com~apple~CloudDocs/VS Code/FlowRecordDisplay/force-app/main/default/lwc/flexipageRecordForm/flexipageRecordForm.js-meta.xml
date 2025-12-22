@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata"
+                          fqn="flexipageRecordForm">
+    <apiVersion>61.0</apiVersion>
+    <isExposed>true</isExposed>
+    <targets>
+        <target>lightning__RecordPage</target>
+        <target>lightning__FlowScreen</target>
+    </targets>
+    <targetConfigs>
+        <targetConfig targets="lightning__RecordPage">
+            <property name="cardTitle" type="String" label="Card Title" description="Title of the card that will be displayed above the fields." />
+            <property name="showIcon" type="Boolean" default="false" label="Show Icon" description="Shows the icon of the object on the top of the card." />
+            <property name="isReadOnly" type="Boolean" label="Read Only Mode" description="" />
+            <property name="cancelLabel" type="String" default="Cancel" label="Cancel Button Label" description="Label for the Cancel button." />
+            <property name="saveLabel" type="String" default="Save" label="Save Button Label" description="Label for the Save button." />
+            <property name="flexiPageName" type="String" />
+            <property name="altField" type="String" label="Alternate Record Lookup" description="Use the field's API Name" />
+            <property name="excludedFields" type="String" label="Excluded Fields" description="Comma-separated list of field API names to exclude from the layout" />
+            <property name="fieldPageName" type="String" label="Field Page Name" description="Field page name" />
+            <property name="useFieldHistory" type="Boolean" label="Use Field History" description="Use field history" />
+        </targetConfig>
+        <targetConfig targets="lightning__FlowScreen">
+            <propertyType name="T" extends="SObject" label="Object API Name" description="Select the api name of the SObject this component is going to be looking for" />
+            <property name="objectApiName" type="String" label="Object API Name" description="Select the api name of the SObject this component is going to be looking for" />
+            <property name="varRecord" type="{T}" label="The created/updated Record" role="outputOnly" description="The SObject the user has selected" />
+            <property name="cardTitle" type="String" label="Card Title" description="Title of the card that will be displayed above the fields." />
+            <property name="showIcon" type="Boolean" default="false" label="Show Icon" description="Shows the icon of the object on the top of the card." />
+            <property name="recordId" type="String" description="Id of the existing record to be used" label="Record Id" />
+            <property name="isReadOnly" type="Boolean" label="Read Only Mode" description="" />
+            <property name="flexiPageName" type="String" />
+            <property name="flowContext" type="Boolean" default="true" label="Running Inside Flow?" />
+            <property name="cancelLabel" type="String" default="Cancel" label="Cancel Button Label" description="Label for the Cancel button." />
+            <property name="saveLabel" type="String" default="Save" label="Save Button Label" description="Label for the Save button." />
+            <property name="altField" type="String" label="Alternate Record Lookup" description="Use the field's API Name" />
+            <property name="excludedFields" type="String" label="Excluded Fields" description="Comma-separated list of field API names to exclude from the layout" />
+            <property name="defaultValues" type="String" label="Default Field Values for New Records (only!)" description="Format: Field1__c:Value1;Field2__c:Value2" />
+            <property name="enableVisibilityRules" type="Boolean" label="Enable Visibility Rules" description="Enable visibility rules from the FlexiPage layout" role="outputOnly" />
+            <property name="columnLayout" type="String" label="Column Layout" description="Column layout configuration" role="outputOnly" />
+            <property name="customCssClass" type="String" label="Custom CSS Class" description="Custom CSS class names" role="outputOnly" />
+            <property name="fieldPageName" type="String" label="Field Page Name" description="Field page name" role="outputOnly" />
+            <property name="fieldSetName" type="String" label="Field Set Name" description="Field set name" role="outputOnly" />
+            <property name="debugMode" type="Boolean" default="false" label="Debug Mode" description="Debug mode flag" />
+            <property name="showSectionHeaders" type="Boolean" default="false" label="Show Section Headers" description="Show section headers flag" />
+            <property name="highlightRequiredFields" type="Boolean" label="Highlight Required Fields" description="Highlight required fields flag" role="outputOnly" />
+            <property name="showEditButtons" type="Boolean" default="false" label="Show Edit Buttons" description="Show edit buttons flag" />
+            <property name="enableCollapsibleSections" type="Boolean" default="false" label="Enable Collapsible Sections" description="Enable collapsible sections flag" />
+            <property name="enableConditionalFormatting" type="Boolean" label="Enable Conditional Formatting" description="Enable conditional formatting flag" role="outputOnly" />
+         </targetConfig>
+    </targetConfigs>
+</LightningComponentBundle>

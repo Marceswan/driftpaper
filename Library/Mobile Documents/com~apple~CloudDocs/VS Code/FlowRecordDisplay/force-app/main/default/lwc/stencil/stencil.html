@@ -1,0 +1,20 @@
+<template>
+    <template for:each={stencilRows} for:item="row">
+        <div key={row.key} class="slds-grid slds-wrap slds-m-bottom_small">
+            <template for:each={row.columns} for:item="column">
+                <div key={column.key} class={column.class}>
+                    <div class="slds-form-element slds-form-element_readonly slds-form-element_stacked">
+                        <span class="slds-form-element__label slds-m-bottom_x-small">
+                            <div class="slds-is-loading_small slds-m-right_small" style="width: 100px; height: 12px; background: #f3f3f3;"></div>
+                        </span>
+                        <div class="slds-form-element__control">
+                            <div class="slds-form-element__static">
+                                <div class="slds-is-loading_small" style="width: 150px; height: 16px; background: #f3f3f3;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </template>
+</template>
