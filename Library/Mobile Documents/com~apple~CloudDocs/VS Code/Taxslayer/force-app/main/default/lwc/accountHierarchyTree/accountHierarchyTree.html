@@ -24,14 +24,25 @@
         <template if:false={isLoading}>
             <template if:false={error}>
                 <template if:true={hasData}>
-                    <div class="tree-container" style={containerStyle}>
-                        <lightning-tree-grid
-                            columns={gridColumns}
-                            data={treeData}
-                            key-field="id"
-                            expanded-rows={expandedRowIds}
-                            hide-checkbox-column>
-                        </lightning-tree-grid>
+                    <div class="tree-wrapper">
+                        <div class="tree-container" style={containerStyle} onscroll={handleScroll}>
+                            <lightning-tree-grid
+                                columns={gridColumns}
+                                data={treeData}
+                                key-field="id"
+                                expanded-rows={expandedRowIds}
+                                hide-checkbox-column>
+                            </lightning-tree-grid>
+                        </div>
+                        <template if:true={showScrollIndicator}>
+                            <div class="scroll-indicator">
+                                <lightning-icon
+                                    icon-name="utility:chevrondown"
+                                    size="xx-small"
+                                    alternative-text="Scroll for more">
+                                </lightning-icon>
+                            </div>
+                        </template>
                     </div>
                 </template>
 

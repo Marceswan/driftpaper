@@ -20,6 +20,7 @@ export default class AccountHierarchyTree extends NavigationMixin(LightningEleme
     isAllExpanded = true;
     allRowIds = [];
     pathToCurrentAccount = [];
+    showScrollIndicator = false;
 
     get gridColumns() {
         return this.parseColumns();
@@ -44,6 +45,23 @@ export default class AccountHierarchyTree extends NavigationMixin(LightningEleme
 
     get containerStyle() {
         return `max-height: ${this.maxHeight}; overflow-y: auto;`;
+    }
+
+    renderedCallback() {
+        this.checkScrollability();
+    }
+
+    checkScrollability() {
+        const container = this.template.querySelector('.tree-container');
+        if (container) {
+            const isScrollable = container.scrollHeight > container.clientHeight;
+            const isAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 5;
+            this.showScrollIndicator = isScrollable && !isAtBottom;
+        }
+    }
+
+    handleScroll() {
+        this.checkScrollability();
     }
 
     get fieldNames() {

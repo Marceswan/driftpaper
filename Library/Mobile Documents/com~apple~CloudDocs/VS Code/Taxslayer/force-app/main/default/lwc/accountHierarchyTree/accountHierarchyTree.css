@@ -12,3 +12,38 @@
 lightning-tree-grid {
     display: block;
 }
+
+/* Wrapper for tree and scroll indicator */
+.tree-wrapper {
+    position: relative;
+}
+
+/* Floating scroll indicator */
+.scroll-indicator {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--slds-g-color-neutral-base-95, #f3f3f3);
+    border: 1px solid var(--slds-g-color-border-base-1, #c9c9c9);
+    border-radius: 50%;
+    padding: 4px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+    opacity: 0.9;
+    animation: bounce 1.5s ease-in-out infinite;
+    cursor: default;
+    z-index: 1;
+}
+
+.scroll-indicator:hover {
+    opacity: 1;
+}
+
+@keyframes bounce {
+    0%, 100% {
+        transform: translateX(-50%) translateY(0);
+    }
+    50% {
+        transform: translateX(-50%) translateY(3px);
+    }
+}
