@@ -121,4 +121,215 @@ private class OpportunityCardsControllerTest {
         System.assertEquals(5, result.openOpportunities.size(), 'Should return 5 open opportunities');
         System.assertEquals(4, result.closedOpportunities.size(), 'Should return 4 closed opportunities');
     }
+
+    @isTest
+    static void testGetOpportunities_SortsDescending() {
+        Account testAccount = getTestAccount();
+        List<String> fields = new List<String>{ 'Amount' };
+
+        Test.startTest();
+        OpportunityCardsController.OpportunityCardsResult result =
+            OpportunityCardsController.getOpportunities(
+                testAccount.Id,
+                fields,
+                'CloseDate',
+                'DESC',
+                10
+            );
+        Test.stopTest();
+
+        // Verify descending order - first open opp should have latest close date
+        System.assert(result.openOpportunities.size() > 1, 'Need multiple opps to test sorting');
+        Date firstDate = result.openOpportunities[0].closeDate;
+        Date secondDate = result.openOpportunities[1].closeDate;
+        System.assert(firstDate >= secondDate, 'Should be sorted descending by close date');
+    }
+
+    @isTest
+    static void testGetOpportunities_IncludesLineItems() {
+        Account testAccount = getTestAccount();
+        List<String> fields = new List<String>{ 'Amount' };
+
+        Test.startTest();
+        OpportunityCardsController.OpportunityCardsResult result =
+            OpportunityCardsController.getOpportunities(
+                testAccount.Id,
+                fields,
+                'CloseDate',
+                'ASC',
+                10
+            );
+        Test.stopTest();
+
+        // Find the opportunity with line items (Open Opp 0)
+        Boolean foundOppWithLineItems = false;
+        for (OpportunityCardsController.OpportunityWrapper opp : result.openOpportunities) {
+            if (opp.name == 'Open Opp 0') {
+                foundOppWithLineItems = true;
+                System.assertEquals(3, opp.lineItems.size(), 'Should have 3 line items');
+
+                // Verify line item data
+                OpportunityCardsController.LineItemWrapper firstItem = opp.lineItems[0];
+                System.assertNotEquals(null, firstItem.productName, 'Product name should be set');
+                System.assertNotEquals(null, firstItem.quantity, 'Quantity should be set');
+                System.assertNotEquals(null, firstItem.unitPrice, 'Unit price should be set');
+                System.assertNotEquals(null, firstItem.totalPrice, 'Total price should be set');
+                break;
+            }
+        }
+        System.assert(foundOppWithLineItems, 'Should find opportunity with line items');
+    }
+
+    @isTest
+    static void testGetOpportunities_RespectsLimit() {
+        Account testAccount = getTestAccount();
+        List<String> fields = new List<String>();
+
+        Test.startTest();
+        OpportunityCardsController.OpportunityCardsResult result =
+            OpportunityCardsController.getOpportunities(
+                testAccount.Id,
+                fields,
+                'CloseDate',
+                'ASC',
+                2  // Only return 2
+            );
+        Test.stopTest();
+
+        // Should respect limit but still have correct totals
+        System.assertEquals(5, result.totalOpenCount, 'Total open count should be 5');
+        System.assertEquals(2, result.openOpportunities.size(), 'Should only return 2 open opportunities');
+    }
+
+    @isTest
+    static void testGetOpportunities_IncludesDynamicFields() {
+        Account testAccount = getTestAccount();
+        List<String> fields = new List<String>{ 'Amount', 'Probability' };
+
+        Test.startTest();
+        OpportunityCardsController.OpportunityCardsResult result =
+            OpportunityCardsController.getOpportunities(
+                testAccount.Id,
+                fields,
+                'CloseDate',
+                'ASC',
+                10
+            );
+        Test.stopTest();
+
+        // Check dynamic fields are included
+        OpportunityCardsController.OpportunityWrapper firstOpp = result.openOpportunities[0];
+        System.assert(firstOpp.fields.containsKey('Amount'), 'Should include Amount field');
+        System.assertNotEquals(null, firstOpp.fields.get('Amount'), 'Amount should have value');
+    }
+
+    @isTest
+    static void testGetOpportunities_NullAccountId() {
+        List<String> fields = new List<String>();
+
+        Test.startTest();
+        OpportunityCardsController.OpportunityCardsResult result =
+            OpportunityCardsController.getOpportunities(
+                null,
+                fields,
+                'CloseDate',
+                'ASC',
+                10
+            );
+        Test.stopTest();
+
+        System.assertEquals(0, result.totalOpenCount, 'Should return empty result for null account');
+        System.assertEquals(0, result.openOpportunities.size(), 'Should have no opportunities');
+    }
+
+    @isTest
+    static void testGetOpportunities_InvalidSortField() {
+        Account testAccount = getTestAccount();
+        List<String> fields = new List<String>();
+
+        Test.startTest();
+        // Should not throw error, should default to CloseDate
+        OpportunityCardsController.OpportunityCardsResult result =
+            OpportunityCardsController.getOpportunities(
+                testAccount.Id,
+                fields,
+                'InvalidField__c',  // Invalid field
+                'ASC',
+                10
+            );
+        Test.stopTest();
+
+        System.assertNotEquals(null, result, 'Should return result even with invalid sort field');
+        System.assert(result.openOpportunities.size() > 0, 'Should still return opportunities');
+    }
+
+    @isTest
+    static void testGetOpportunities_ClosedWonVsLost() {
+        Account testAccount = getTestAccount();
+        List<String> fields = new List<String>();
+
+        Test.startTest();
+        OpportunityCardsController.OpportunityCardsResult result =
+            OpportunityCardsController.getOpportunities(
+                testAccount.Id,
+                fields,
+                'CloseDate',
+                'ASC',
+                10
+            );
+        Test.stopTest();
+
+        // Verify isWon flag is correctly set
+        Integer wonCount = 0;
+        Integer lostCount = 0;
+        for (OpportunityCardsController.OpportunityWrapper opp : result.closedOpportunities) {
+            if (opp.isWon) {
+                wonCount++;
+            } else {
+                lostCount++;
+            }
+        }
+        System.assertEquals(3, wonCount, 'Should have 3 closed won opportunities');
+        System.assertEquals(1, lostCount, 'Should have 1 closed lost opportunity');
+    }
+
+    @isTest
+    static void testGetOpportunities_BulkData() {
+        Account testAccount = getTestAccount();
+
+        // Create 200 more opportunities
+        List<Opportunity> bulkOpps = new List<Opportunity>();
+        for (Integer i = 0; i < 200; i++) {
+            bulkOpps.add(new Opportunity(
+                Name = 'Bulk Opp ' + i,
+                AccountId = testAccount.Id,
+                StageName = 'Prospecting',
+                CloseDate = Date.today().addDays(i),
+                Amount = 100
+            ));
+        }
+        insert bulkOpps;
+
+        List<String> fields = new List<String>{ 'Amount' };
+
+        Test.startTest();
+        OpportunityCardsController.OpportunityCardsResult result =
+            OpportunityCardsController.getOpportunities(
+                testAccount.Id,
+                fields,
+                'CloseDate',
+                'ASC',
+                15
+            );
+        Test.stopTest();
+
+        // Should handle bulk data and respect limit
+        // Query has LIMIT of (15 * 2 + 10) = 40, so we get at most 40 total records
+        // 5 open opps from setup + 200 new = 205 total, but query returns max 40
+        System.assert(result.totalOpenCount >= 15, 'Should have at least 15 open opportunities');
+        System.assertEquals(15, result.openOpportunities.size(), 'Should only return 15 based on limitCount');
+
+        // Verify the controller respects the limit parameter
+        System.assert(result.openOpportunities.size() <= 15, 'Should not exceed requested limit');
+    }
 }
