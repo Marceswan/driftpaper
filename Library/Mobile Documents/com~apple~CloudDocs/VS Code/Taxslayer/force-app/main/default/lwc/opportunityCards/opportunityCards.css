@@ -1,0 +1,10 @@
+.cards-container {
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.tab-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 0.5rem;
+}

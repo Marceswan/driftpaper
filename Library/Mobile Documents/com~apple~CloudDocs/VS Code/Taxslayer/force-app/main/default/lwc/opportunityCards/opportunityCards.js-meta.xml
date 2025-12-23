@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>65.0</apiVersion>
+    <isExposed>true</isExposed>
+    <masterLabel>Opportunity Cards</masterLabel>
+    <description>Card-based display of related Opportunities with product pills and badges</description>
+    <targets>
+        <target>lightning__RecordPage</target>
+        <target>lightning__AppPage</target>
+    </targets>
+    <targetConfigs>
+        <targetConfig targets="lightning__RecordPage">
+            <objects>
+                <object>Account</object>
+            </objects>
+            <property name="displayMode" type="String" default="single"
+                      label="Display Mode"
+                      description="single = all in one list, tabbed = open/closed tabs, multi = separate sections"
+                      datasource="single,tabbed,multi"/>
+            <property name="highlightFields" type="String" default="Amount,Probability"
+                      label="Highlight Fields"
+                      description="Comma-separated API names of fields to display"/>
+        </targetConfig>
+        <targetConfig targets="lightning__AppPage">
+            <property name="displayMode" type="String" default="single"
+                      label="Display Mode"
+                      datasource="single,tabbed,multi"/>
+            <property name="highlightFields" type="String" default="Amount,Probability"
+                      label="Highlight Fields"/>
+        </targetConfig>
+    </targetConfigs>
+</LightningComponentBundle>
