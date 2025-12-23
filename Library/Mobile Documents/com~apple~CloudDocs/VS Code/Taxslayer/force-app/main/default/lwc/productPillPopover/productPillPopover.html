@@ -1,0 +1,63 @@
+<template>
+    <div class="pill-container"
+         onmouseenter={handleMouseEnter}
+         onmouseleave={handleMouseLeave}>
+        <span class="slds-badge slds-badge_lightest product-pill" title={productName}>
+            {displayName}
+        </span>
+
+        <template if:true={showPopover}>
+            <section class="slds-popover slds-popover_tooltip slds-nubbin_bottom-left popover-container"
+                     role="tooltip">
+                <div class="slds-popover__body">
+                    <dl class="slds-dl_horizontal slds-text-body_small">
+                        <dt class="slds-dl_horizontal__label">
+                            <span class="slds-truncate">Product</span>
+                        </dt>
+                        <dd class="slds-dl_horizontal__detail">
+                            <span class="slds-text-title_bold">{productName}</span>
+                        </dd>
+
+                        <dt class="slds-dl_horizontal__label">
+                            <span class="slds-truncate">Quantity</span>
+                        </dt>
+                        <dd class="slds-dl_horizontal__detail">
+                            <lightning-formatted-number value={quantity}
+                                                        maximum-fraction-digits="2">
+                            </lightning-formatted-number>
+                        </dd>
+
+                        <dt class="slds-dl_horizontal__label">
+                            <span class="slds-truncate">Unit Price</span>
+                        </dt>
+                        <dd class="slds-dl_horizontal__detail">
+                            <lightning-formatted-number value={unitPrice}
+                                                        format-style="currency"
+                                                        currency-code="USD">
+                            </lightning-formatted-number>
+                        </dd>
+
+                        <dt class="slds-dl_horizontal__label">
+                            <span class="slds-truncate">Total Price</span>
+                        </dt>
+                        <dd class="slds-dl_horizontal__detail">
+                            <lightning-formatted-number value={totalPrice}
+                                                        format-style="currency"
+                                                        currency-code="USD">
+                            </lightning-formatted-number>
+                        </dd>
+
+                        <template if:true={description}>
+                            <dt class="slds-dl_horizontal__label">
+                                <span class="slds-truncate">Description</span>
+                            </dt>
+                            <dd class="slds-dl_horizontal__detail description-text">
+                                {description}
+                            </dd>
+                        </template>
+                    </dl>
+                </div>
+            </section>
+        </template>
+    </div>
+</template>
