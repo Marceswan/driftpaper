@@ -1,0 +1,18 @@
+<template>
+    <lightning-modal-header label={modalLabel}></lightning-modal-header>
+    <lightning-modal-body>
+        <div class="modal-body-container">
+            <template for:each={opportunities} for:item="opp">
+                <c-opportunity-card
+                    key={opp.id}
+                    opportunity={opp}
+                    highlight-fields={highlightFields}
+                    field-labels={fieldLabels}>
+                </c-opportunity-card>
+            </template>
+        </div>
+    </lightning-modal-body>
+    <lightning-modal-footer>
+        <lightning-button label="Close" onclick={handleClose}></lightning-button>
+    </lightning-modal-footer>
+</template>
