@@ -98,4 +98,27 @@ private class OpportunityCardsControllerTest {
         OpportunityCardsController.LineItemWrapper lineWrapper = new OpportunityCardsController.LineItemWrapper();
         System.assertNotEquals(null, lineWrapper, 'LineItemWrapper should be instantiated');
     }
+
+    @isTest
+    static void testGetOpportunities_ReturnsOpenAndClosed() {
+        Account testAccount = getTestAccount();
+        List<String> fields = new List<String>{ 'Amount', 'Probability' };
+
+        Test.startTest();
+        OpportunityCardsController.OpportunityCardsResult result =
+            OpportunityCardsController.getOpportunities(
+                testAccount.Id,
+                fields,
+                'CloseDate',
+                'ASC',
+                10
+            );
+        Test.stopTest();
+
+        // We created 5 open and 4 closed (3 won + 1 lost)
+        System.assertEquals(5, result.totalOpenCount, 'Should have 5 open opportunities');
+        System.assertEquals(4, result.totalClosedCount, 'Should have 4 closed opportunities');
+        System.assertEquals(5, result.openOpportunities.size(), 'Should return 5 open opportunities');
+        System.assertEquals(4, result.closedOpportunities.size(), 'Should return 4 closed opportunities');
+    }
 }
