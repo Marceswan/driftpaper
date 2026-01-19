@@ -42,6 +42,20 @@ module.exports = {
 
   mode: 'production',
 
+  // Suppress asset size warnings for WASM files
+  performance: {
+    hints: false,
+  },
+
+  devServer: {
+    client: {
+      overlay: {
+        warnings: false,
+        errors: true,
+      },
+    },
+  },
+
   experiments: {
     asyncWebAssembly: true,
   },
