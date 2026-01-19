@@ -30,27 +30,18 @@ const settings = {
   ],
 };
 
+// Replace canvas element (needed after failed WebGPU attempt taints the canvas)
+function replaceCanvas() {
+  const oldCanvas = document.getElementById("canvas");
+  const newCanvas = document.createElement("canvas");
+  newCanvas.id = "canvas";
+  oldCanvas.parentNode.replaceChild(newCanvas, oldCanvas);
+  return newCanvas;
+}
+
 async function initFlux() {
-  const canvas = document.getElementById("canvas");
-
-  // Debug canvas dimensions
-  console.log("Canvas clientWidth:", canvas.clientWidth, "clientHeight:", canvas.clientHeight);
-  console.log("Window dimensions:", window.innerWidth, window.innerHeight);
-
-  // If canvas has no CSS dimensions yet, force them
-  if (canvas.clientWidth === 0 || canvas.clientHeight === 0) {
-    console.log("Canvas has no dimensions, setting explicitly");
-    canvas.style.width = window.innerWidth + "px";
-    canvas.style.height = window.innerHeight + "px";
-    // Force reflow
-    canvas.offsetHeight;
-    console.log("After fix - clientWidth:", canvas.clientWidth, "clientHeight:", canvas.clientHeight);
-  }
-
-  // Set canvas buffer size to match display size
-  canvas.width = canvas.clientWidth * window.devicePixelRatio;
-  canvas.height = canvas.clientHeight * window.devicePixelRatio;
-  console.log("Canvas buffer size:", canvas.width, canvas.height);
+  let canvas = document.getElementById("canvas");
+  console.log("Canvas dimensions:", canvas.clientWidth, "x", canvas.clientHeight);
 
   try {
     // Check WebGPU support
@@ -65,8 +56,17 @@ async function initFlux() {
       console.log("Backend: WebGPU");
       const wasm = await import(/* webpackIgnore: true */ "/flux/flux_wasm.js");
       await wasm.default("/flux/flux_wasm_bg.wasm");
-      flux = await new wasm.Flux(settings);
-    } else {
+      try {
+        flux = await new wasm.Flux(settings);
+      } catch (webgpuError) {
+        console.log("WebGPU context creation failed, falling back to WebGL2:", webgpuError);
+        // Replace canvas since WebGPU may have tainted it
+        canvas = replaceCanvas();
+        hasWebGPU = false;
+      }
+    }
+
+    if (!hasWebGPU && !flux) {
       console.log("Backend: WebGL2");
       console.log("WebGL2RenderingContext available:", typeof WebGL2RenderingContext !== "undefined");
 
