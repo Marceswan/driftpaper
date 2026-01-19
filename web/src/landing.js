@@ -30,12 +30,34 @@ const settings = {
   ],
 };
 
+// Check if WebGL2 is supported (using a test canvas to not interfere with main canvas)
+function checkWebGL2Support() {
+  try {
+    const testCanvas = document.createElement("canvas");
+    testCanvas.width = 1;
+    testCanvas.height = 1;
+    const gl = testCanvas.getContext("webgl2");
+    if (gl) {
+      // Clean up
+      const ext = gl.getExtension("WEBGL_lose_context");
+      if (ext) ext.loseContext();
+      return true;
+    }
+  } catch (e) {
+    console.log("WebGL2 test failed:", e);
+  }
+  return false;
+}
+
 async function initFlux() {
   const canvas = document.getElementById("canvas");
 
   // Debug canvas dimensions
+  console.log("Canvas element:", canvas);
   console.log("Canvas clientWidth:", canvas.clientWidth, "clientHeight:", canvas.clientHeight);
+  console.log("Canvas width attr:", canvas.width, "height attr:", canvas.height);
   console.log("Window innerWidth:", window.innerWidth, "innerHeight:", window.innerHeight);
+  console.log("Device pixel ratio:", window.devicePixelRatio);
 
   // Set initial canvas size
   canvas.width = window.innerWidth * window.devicePixelRatio;
@@ -44,6 +66,9 @@ async function initFlux() {
   // Also set CSS dimensions explicitly
   canvas.style.width = window.innerWidth + "px";
   canvas.style.height = window.innerHeight + "px";
+
+  // Log after setting
+  console.log("After setting - clientWidth:", canvas.clientWidth, "clientHeight:", canvas.clientHeight);
 
   try {
     // Check WebGPU support
@@ -61,9 +86,20 @@ async function initFlux() {
       flux = await new wasm.Flux(settings);
     } else {
       console.log("Backend: WebGL2");
+
+      // Pre-check WebGL2 support before loading WASM
+      const hasWebGL2 = checkWebGL2Support();
+      console.log("WebGL2 pre-check:", hasWebGL2);
+
+      if (!hasWebGL2) {
+        throw new Error("WebGL2 not supported by this browser");
+      }
+
       const wasm = await import(/* webpackIgnore: true */ "/flux-gl/flux_gl_wasm.js");
       await wasm.default("/flux-gl/flux_gl_wasm_bg.wasm");
+      console.log("WASM loaded, creating Flux instance...");
       flux = new wasm.Flux(settings);
+      console.log("Flux instance created");
     }
 
     // Animation loop
@@ -92,6 +128,7 @@ async function initFlux() {
     console.log("Drift animation initialized successfully");
   } catch (error) {
     console.error("Failed to initialize Drift animation:", error);
+    console.error("Error stack:", error.stack);
     // Use animated gradient fallback
     document.body.classList.remove("loading");
     document.body.classList.add("animation-failed");
