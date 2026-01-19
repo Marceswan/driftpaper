@@ -35,6 +35,22 @@ async function initFlux() {
 
   // Debug canvas dimensions
   console.log("Canvas clientWidth:", canvas.clientWidth, "clientHeight:", canvas.clientHeight);
+  console.log("Window dimensions:", window.innerWidth, window.innerHeight);
+
+  // If canvas has no CSS dimensions yet, force them
+  if (canvas.clientWidth === 0 || canvas.clientHeight === 0) {
+    console.log("Canvas has no dimensions, setting explicitly");
+    canvas.style.width = window.innerWidth + "px";
+    canvas.style.height = window.innerHeight + "px";
+    // Force reflow
+    canvas.offsetHeight;
+    console.log("After fix - clientWidth:", canvas.clientWidth, "clientHeight:", canvas.clientHeight);
+  }
+
+  // Set canvas buffer size to match display size
+  canvas.width = canvas.clientWidth * window.devicePixelRatio;
+  canvas.height = canvas.clientHeight * window.devicePixelRatio;
+  console.log("Canvas buffer size:", canvas.width, canvas.height);
 
   try {
     // Check WebGPU support
@@ -52,9 +68,13 @@ async function initFlux() {
       flux = await new wasm.Flux(settings);
     } else {
       console.log("Backend: WebGL2");
+      console.log("WebGL2RenderingContext available:", typeof WebGL2RenderingContext !== "undefined");
+
       const wasm = await import(/* webpackIgnore: true */ "/flux-gl/flux_gl_wasm.js");
       await wasm.default("/flux-gl/flux_gl_wasm_bg.wasm");
+      console.log("WASM loaded, creating Flux with settings:", JSON.stringify(settings));
       flux = new wasm.Flux(settings);
+      console.log("Flux created successfully");
     }
 
     // Animation loop
