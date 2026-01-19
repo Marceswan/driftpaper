@@ -33,9 +33,17 @@ const settings = {
 async function initFlux() {
   const canvas = document.getElementById("canvas");
 
+  // Debug canvas dimensions
+  console.log("Canvas clientWidth:", canvas.clientWidth, "clientHeight:", canvas.clientHeight);
+  console.log("Window innerWidth:", window.innerWidth, "innerHeight:", window.innerHeight);
+
   // Set initial canvas size
   canvas.width = window.innerWidth * window.devicePixelRatio;
   canvas.height = window.innerHeight * window.devicePixelRatio;
+
+  // Also set CSS dimensions explicitly
+  canvas.style.width = window.innerWidth + "px";
+  canvas.style.height = window.innerHeight + "px";
 
   try {
     // Check WebGPU support
@@ -90,9 +98,18 @@ async function initFlux() {
   }
 }
 
-// Initialize when DOM is ready
+// Initialize after layout is ready
+function startInit() {
+  // Wait for next frame to ensure CSS is applied and canvas has dimensions
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      initFlux();
+    });
+  });
+}
+
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initFlux);
+  document.addEventListener("DOMContentLoaded", startInit);
 } else {
-  initFlux();
+  startInit();
 }
