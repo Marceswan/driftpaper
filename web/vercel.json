@@ -1,0 +1,6 @@
+{
+  "buildCommand": "pnpm build:landing",
+  "outputDirectory": "dist",
+  "installCommand": "pnpm install",
+  "framework": null
+}

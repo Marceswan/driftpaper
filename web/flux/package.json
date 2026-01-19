@@ -1,0 +1,24 @@
+{
+  "name": "flux-wasm",
+  "type": "module",
+  "collaborators": [
+    "Sander Melnikov <hey@sandydoo.me"
+  ],
+  "description": "An open-source tribute to the macOS Drift screensaver",
+  "version": "7.0.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sandydoo/flux/"
+  },
+  "files": [
+    "flux_wasm_bg.wasm",
+    "flux_wasm.js",
+    "flux_wasm.d.ts"
+  ],
+  "main": "flux_wasm.js",
+  "types": "flux_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

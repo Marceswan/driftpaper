@@ -5,8 +5,8 @@
 # Elm
 /elm-stuff
 
-# Rust
-/flux
+# Rust - commented out to track pre-built WASM for Vercel
+# /flux
 
 # Release
 /dist

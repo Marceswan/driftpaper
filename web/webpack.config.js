@@ -11,29 +11,48 @@ module.exports = (env, argv) => {
   console.log(env);
 
   let config = {
-    entry: './src/index.js',
+    entry: {
+      index: './src/index.js',
+      landing: './src/landing.js',
+    },
 
     output: {
       path: path.resolve(__dirname, 'dist'),
-      filename: 'index.js',
+      filename: '[name].js',
     },
 
     module: {
-      rules: [{
-        test: /\.elm$/,
-        exclude: [/elm-stuff/, /node_modules/],
-        use: {
-          loader: 'elm-webpack-loader',
-          options: {
-            pathToElm: elmBin,
+      rules: [
+        {
+          test: /\.elm$/,
+          exclude: [/elm-stuff/, /node_modules/],
+          use: {
+            loader: 'elm-webpack-loader',
+            options: {
+              pathToElm: elmBin,
+            },
           },
         },
-      }],
+        {
+          test: /\.css$/,
+          use: ['style-loader', 'css-loader'],
+        },
+      ],
     },
 
     plugins: [
+      // Main app with Elm UI controls
       new HtmlWebpackPlugin({
         template: 'src/index.html',
+        filename: 'app.html',
+        chunks: ['index'],
+      }),
+
+      // Landing page (minimal, no Elm)
+      new HtmlWebpackPlugin({
+        template: 'src/landing.html',
+        filename: 'index.html',
+        chunks: ['landing'],
       }),
 
       new CopyPlugin({
