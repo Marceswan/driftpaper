@@ -11,6 +11,7 @@ struct LineUniforms {
   line_noise_blend_factor: f32,
   color_mode: u32,
   delta_time: f32,
+  brightness_scale: f32,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: LineUniforms;
@@ -78,11 +79,79 @@ fn main_vs(
   );
 }
 
+// Convert RGB to HSL
+fn rgb_to_hsl(rgb: vec3<f32>) -> vec3<f32> {
+  let max_c = max(max(rgb.r, rgb.g), rgb.b);
+  let min_c = min(min(rgb.r, rgb.g), rgb.b);
+  let delta = max_c - min_c;
+
+  var h: f32 = 0.0;
+  var s: f32 = 0.0;
+  let l = (max_c + min_c) * 0.5;
+
+  if (delta > 0.0) {
+    s = delta / (1.0 - abs(2.0 * l - 1.0));
+    if (max_c == rgb.r) {
+      h = ((rgb.g - rgb.b) / delta) % 6.0;
+    } else if (max_c == rgb.g) {
+      h = (rgb.b - rgb.r) / delta + 2.0;
+    } else {
+      h = (rgb.r - rgb.g) / delta + 4.0;
+    }
+    h /= 6.0;
+    if (h < 0.0) {
+      h += 1.0;
+    }
+  }
+
+  return vec3<f32>(h, s, l);
+}
+
+// Convert HSL to RGB
+fn hsl_to_rgb(hsl: vec3<f32>) -> vec3<f32> {
+  let h = hsl.x;
+  let s = hsl.y;
+  let l = hsl.z;
+
+  let c = (1.0 - abs(2.0 * l - 1.0)) * s;
+  let x = c * (1.0 - abs((h * 6.0) % 2.0 - 1.0));
+  let m = l - c * 0.5;
+
+  var rgb: vec3<f32>;
+  let h6 = h * 6.0;
+
+  if (h6 < 1.0) {
+    rgb = vec3<f32>(c, x, 0.0);
+  } else if (h6 < 2.0) {
+    rgb = vec3<f32>(x, c, 0.0);
+  } else if (h6 < 3.0) {
+    rgb = vec3<f32>(0.0, c, x);
+  } else if (h6 < 4.0) {
+    rgb = vec3<f32>(0.0, x, c);
+  } else if (h6 < 5.0) {
+    rgb = vec3<f32>(x, 0.0, c);
+  } else {
+    rgb = vec3<f32>(c, 0.0, x);
+  }
+
+  return rgb + m;
+}
+
+// Cap saturation and luminance to reduce eye strain
+fn cap_brightness(rgb: vec3<f32>) -> vec3<f32> {
+  var hsl = rgb_to_hsl(rgb);
+  // Cap saturation at 25% for very muted colors
+  hsl.y = min(hsl.y, 0.25);
+  // Cap luminance at 30% - much darker
+  hsl.z = min(hsl.z, 0.30);
+  return hsl_to_rgb(hsl);
+}
+
 @fragment
 fn main_fs(fs_input: VertexOutput) -> @location(0) vec4<f32> {
   var color = fs_input.f_bottom_color;
 
-  // Test which side of the endpoint we’re on.
+  // Test which side of the endpoint we're on.
   let side
     = (fs_input.f_vertex.x - fs_input.f_mindpoint_vector.x) * (-fs_input.f_mindpoint_vector.y)
     - (fs_input.f_vertex.y - fs_input.f_mindpoint_vector.y) * (-fs_input.f_mindpoint_vector.x);
@@ -93,5 +162,11 @@ fn main_fs(fs_input: VertexOutput) -> @location(0) vec4<f32> {
 
   let distance = length(fs_input.f_vertex);
   let smoothEdges = 1.0 - smoothstep(1.0 - fwidth(distance), 1.0, distance);
-  return vec4<f32>(color.rgb, color.a * smoothEdges);
+
+  // Apply brightness capping
+  let capped_color = cap_brightness(color.rgb);
+  // Scale color by brightness_scale (based on line count) to normalize across displays
+  // Base multiplier 0.3 for darker overall look, then scale by line count
+  let scaled_color = capped_color * uniforms.brightness_scale * 0.3;
+  return vec4<f32>(scaled_color, color.a * smoothEdges);
 }

@@ -20,6 +20,7 @@ struct LineUniforms {
   line_noise_blend_factor: f32,
   color_mode: u32,
   delta_time: f32,
+  brightness_scale: f32,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: LineUniforms;
@@ -175,12 +176,19 @@ fn main(
     }
   }
 
+  // Cap the target color at source before interpolation
+  let capped_color = cap_brightness(color);
+
   let new_color_velocity
     = line.color_velocity * (1.0 - color_momentum_boost * uniforms.delta_time)
-    + (color.rgb - line.color.rgb) * color_delta_boost * uniforms.delta_time;
+    + (capped_color - line.color.rgb) * color_delta_boost * uniforms.delta_time;
+
+  // Cap the final color to ensure brightness stays low
+  let interpolated_color = saturate(line.color.rgb + uniforms.delta_time * new_color_velocity);
+  let final_capped_color = cap_brightness(interpolated_color);
 
   let new_color = vec4(
-    saturate(line.color.rgb + uniforms.delta_time * new_color_velocity),
+    final_capped_color,
     opacity,
   );
 
@@ -195,6 +203,74 @@ fn main(
 
 const pi = 3.141592653589793;
 const tau = 2.0 * pi;
+
+// Convert RGB to HSL
+fn rgb_to_hsl(rgb: vec3<f32>) -> vec3<f32> {
+  let max_c = max(max(rgb.r, rgb.g), rgb.b);
+  let min_c = min(min(rgb.r, rgb.g), rgb.b);
+  let delta = max_c - min_c;
+
+  var h: f32 = 0.0;
+  var s: f32 = 0.0;
+  let l = (max_c + min_c) * 0.5;
+
+  if (delta > 0.0) {
+    s = delta / (1.0 - abs(2.0 * l - 1.0));
+    if (max_c == rgb.r) {
+      h = ((rgb.g - rgb.b) / delta) % 6.0;
+    } else if (max_c == rgb.g) {
+      h = (rgb.b - rgb.r) / delta + 2.0;
+    } else {
+      h = (rgb.r - rgb.g) / delta + 4.0;
+    }
+    h /= 6.0;
+    if (h < 0.0) {
+      h += 1.0;
+    }
+  }
+
+  return vec3<f32>(h, s, l);
+}
+
+// Convert HSL to RGB
+fn hsl_to_rgb(hsl: vec3<f32>) -> vec3<f32> {
+  let h = hsl.x;
+  let s = hsl.y;
+  let l = hsl.z;
+
+  let c = (1.0 - abs(2.0 * l - 1.0)) * s;
+  let x = c * (1.0 - abs((h * 6.0) % 2.0 - 1.0));
+  let m = l - c * 0.5;
+
+  var rgb: vec3<f32>;
+  let h6 = h * 6.0;
+
+  if (h6 < 1.0) {
+    rgb = vec3<f32>(c, x, 0.0);
+  } else if (h6 < 2.0) {
+    rgb = vec3<f32>(x, c, 0.0);
+  } else if (h6 < 3.0) {
+    rgb = vec3<f32>(0.0, c, x);
+  } else if (h6 < 4.0) {
+    rgb = vec3<f32>(0.0, x, c);
+  } else if (h6 < 5.0) {
+    rgb = vec3<f32>(x, 0.0, c);
+  } else {
+    rgb = vec3<f32>(c, 0.0, x);
+  }
+
+  return rgb + m;
+}
+
+// Cap saturation and luminance at source to prevent bright accumulation
+fn cap_brightness(rgb: vec3<f32>) -> vec3<f32> {
+  var hsl = rgb_to_hsl(rgb);
+  // Cap saturation at 25% for very muted colors
+  hsl.y = min(hsl.y, 0.25);
+  // Cap luminance at 30% - much darker
+  hsl.z = min(hsl.z, 0.30);
+  return hsl_to_rgb(hsl);
+}
 
 // Get a color from the ring buffer of colors.
 // Limit specifies the value at which the color should wrap around.

@@ -120,7 +120,7 @@ pub enum ColorPreset {
     Original,
     Plasma,
     Poolside,
-    Freedom,
+    SpaceGrey,
 }
 
 impl ColorPreset {
@@ -128,6 +128,7 @@ impl ColorPreset {
         match self {
             ColorPreset::Plasma => Some(COLOR_SCHEME_PLASMA),
             ColorPreset::Poolside => Some(COLOR_SCHEME_POOLSIDE),
+            ColorPreset::SpaceGrey => Some(COLOR_SCHEME_SPACE_GREY),
             _ => None,
         }
     }
@@ -159,4 +160,15 @@ pub static COLOR_SCHEME_POOLSIDE: [f32; 24] = [
     188.0 / 255.0, 228.0 / 255.0, 244.0 / 255.0, 1.0,
     124.0 / 255.0, 220.0 / 255.0, 236.0 / 255.0, 1.0,
     156.0 / 255.0, 208.0 / 255.0, 236.0 / 255.0, 1.0,
+];
+
+// Space Grey - grayscale scheme with saturation=0, luminance <75% (max ~191/255)
+#[rustfmt::skip]
+pub static COLOR_SCHEME_SPACE_GREY: [f32; 24] = [
+    80.0 / 255.0, 80.0 / 255.0, 80.0 / 255.0, 1.0,      // Dark grey
+    120.0 / 255.0, 120.0 / 255.0, 120.0 / 255.0, 1.0,   // Medium grey
+    100.0 / 255.0, 100.0 / 255.0, 100.0 / 255.0, 1.0,   // Grey
+    160.0 / 255.0, 160.0 / 255.0, 160.0 / 255.0, 1.0,   // Light grey
+    140.0 / 255.0, 140.0 / 255.0, 140.0 / 255.0, 1.0,   // Medium-light grey
+    180.0 / 255.0, 180.0 / 255.0, 180.0 / 255.0, 1.0,   // Lighter grey (70% luminance)
 ];

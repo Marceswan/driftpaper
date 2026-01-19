@@ -27,8 +27,11 @@ struct LineUniforms {
     color_mode: u32, // 44
 
     delta_time: f32, // 48
-    _padding: u32,   // 52
-                     // roundUp(52, 8) = 56
+
+    // Scale factor to normalize brightness across different line counts
+    // Higher line counts need lower brightness to avoid additive accumulation
+    brightness_scale: f32, // 52
+                           // roundUp(56, 8) = 56
 }
 
 impl LineUniforms {
@@ -36,6 +39,15 @@ impl LineUniforms {
         // TODO: can we compute the scale factor from the grid?
         let line_scale_factor =
             get_line_scale_factor(screen_size.width as f32, screen_size.height as f32);
+
+        // Calculate brightness scale to normalize across different line counts
+        // Base of 12000 lines gets scale 1.0 - more aggressive scaling
+        // More lines = much lower scale to prevent additive brightness accumulation
+        let base_line_count = 12000.0_f32;
+        let line_ratio = base_line_count / grid.line_count as f32;
+        // Use linear ratio (not sqrt) for more aggressive darkening on high-line-count displays
+        let brightness_scale = line_ratio.min(1.0);
+        log::info!("Display brightness_scale: {} (line_count: {})", brightness_scale, grid.line_count);
 
         Self {
             aspect: grid.aspect_ratio,
@@ -50,7 +62,7 @@ impl LineUniforms {
             line_noise_blend_factor: 0.0,
             color_mode: settings.color_mode.clone().into(),
             delta_time: 1.0 / 60.0, // Initial value, will be updated every frame
-            _padding: 0,
+            brightness_scale,
         }
     }
 
