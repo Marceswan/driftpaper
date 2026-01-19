@@ -40,14 +40,14 @@ async function initFlux() {
     if (hasWebGPU) {
       console.log("Backend: WebGPU");
       // Load WebGPU WASM module
-      const wasm = await import(/* webpackIgnore: true */ "./flux/flux_wasm.js");
-      await wasm.default("./flux/flux_wasm_bg.wasm");
+      const wasm = await import(/* webpackIgnore: true */ "/flux/flux_wasm.js");
+      await wasm.default("/flux/flux_wasm_bg.wasm");
       flux = await new wasm.Flux(settings);
     } else {
       console.log("Backend: WebGL2");
       // Load WebGL2 WASM module
-      const wasm = await import(/* webpackIgnore: true */ "./flux-gl/flux_gl_wasm.js");
-      await wasm.default("./flux-gl/flux_gl_wasm_bg.wasm");
+      const wasm = await import(/* webpackIgnore: true */ "/flux-gl/flux_gl_wasm.js");
+      await wasm.default("/flux-gl/flux_gl_wasm_bg.wasm");
       flux = new wasm.Flux(settings);
     }
 
