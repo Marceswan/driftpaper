@@ -43,14 +43,28 @@ async function initFlux() {
   let canvas = document.getElementById("canvas");
   console.log("Canvas dimensions:", canvas.clientWidth, "x", canvas.clientHeight);
 
-  // Test if we can actually create a WebGL2 context
-  const testCtx = canvas.getContext("webgl2");
-  console.log("WebGL2 test context:", testCtx ? "SUCCESS" : "FAILED");
-  if (testCtx) {
-    // Get some debug info
-    console.log("WebGL2 Renderer:", testCtx.getParameter(testCtx.RENDERER));
-    console.log("WebGL2 Vendor:", testCtx.getParameter(testCtx.VENDOR));
+  // Test what contexts we can create
+  const testCtx2 = canvas.getContext("webgl2");
+  console.log("WebGL2 test:", testCtx2 ? "SUCCESS" : "FAILED");
+
+  if (!testCtx2) {
+    // Try WebGL1
+    const testCtx1 = canvas.getContext("webgl");
+    console.log("WebGL1 test:", testCtx1 ? "SUCCESS" : "FAILED");
+
+    // Try 2D canvas
+    canvas = replaceCanvas();
+    const test2d = document.getElementById("canvas").getContext("2d");
+    console.log("Canvas 2D test:", test2d ? "SUCCESS" : "FAILED");
+
+    console.error("WebGL2 is not available in your browser. Please enable hardware acceleration in Chrome settings (chrome://settings/system) or check chrome://gpu for WebGL status.");
+    document.body.classList.remove("loading");
+    document.body.classList.add("animation-failed");
+    return; // Exit early - can't render without WebGL2
   }
+
+  console.log("WebGL2 Renderer:", testCtx2.getParameter(testCtx2.RENDERER));
+  console.log("WebGL2 Vendor:", testCtx2.getParameter(testCtx2.VENDOR));
 
   try {
     // Check WebGPU support - but actually try to get a device, not just adapter
