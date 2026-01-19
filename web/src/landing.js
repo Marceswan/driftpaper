@@ -30,23 +30,10 @@ const settings = {
   ],
 };
 
-// Check if WebGL2 is supported (using a test canvas to not interfere with main canvas)
+// Check if WebGL2 is supported (simple feature check without creating context)
 function checkWebGL2Support() {
-  try {
-    const testCanvas = document.createElement("canvas");
-    testCanvas.width = 1;
-    testCanvas.height = 1;
-    const gl = testCanvas.getContext("webgl2");
-    if (gl) {
-      // Clean up
-      const ext = gl.getExtension("WEBGL_lose_context");
-      if (ext) ext.loseContext();
-      return true;
-    }
-  } catch (e) {
-    console.log("WebGL2 test failed:", e);
-  }
-  return false;
+  // Check if WebGL2RenderingContext exists in the global scope
+  return typeof WebGL2RenderingContext !== "undefined";
 }
 
 async function initFlux() {
