@@ -33,21 +33,28 @@ const settings = {
 async function initFlux() {
   const canvas = document.getElementById("canvas");
 
+  // Set initial canvas size
+  canvas.width = window.innerWidth * window.devicePixelRatio;
+  canvas.height = window.innerHeight * window.devicePixelRatio;
+
   try {
     // Check WebGPU support
-    const hasWebGPU = navigator.gpu && await navigator.gpu.requestAdapter();
+    let hasWebGPU = false;
+    try {
+      hasWebGPU = navigator.gpu && await navigator.gpu.requestAdapter();
+    } catch (e) {
+      console.log("WebGPU not available:", e);
+    }
 
     if (hasWebGPU) {
       console.log("Backend: WebGPU");
-      // Load WebGPU WASM module
       const wasm = await import(/* webpackIgnore: true */ "/flux/flux_wasm.js");
-      await wasm.default("/flux/flux_wasm_bg.wasm");
+      await wasm.default({ module_or_path: "/flux/flux_wasm_bg.wasm" });
       flux = await new wasm.Flux(settings);
     } else {
       console.log("Backend: WebGL2");
-      // Load WebGL2 WASM module
       const wasm = await import(/* webpackIgnore: true */ "/flux-gl/flux_gl_wasm.js");
-      await wasm.default("/flux-gl/flux_gl_wasm_bg.wasm");
+      await wasm.default({ module_or_path: "/flux-gl/flux_gl_wasm_bg.wasm" });
       flux = new wasm.Flux(settings);
     }
 
@@ -61,6 +68,8 @@ async function initFlux() {
     const resizeObserver = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
       if (width > 0 && height > 0) {
+        canvas.width = width * window.devicePixelRatio;
+        canvas.height = height * window.devicePixelRatio;
         flux.resize(width, height);
       }
     });
@@ -69,13 +78,15 @@ async function initFlux() {
     // Start animation
     window.requestAnimationFrame(animate);
 
-    // Remove loading class once initialized
+    // Mark as ready
     document.body.classList.remove("loading");
+    document.body.classList.add("animation-ready");
     console.log("Drift animation initialized successfully");
   } catch (error) {
     console.error("Failed to initialize Drift animation:", error);
-    // Keep the gradient background as fallback
-    document.body.classList.add("loading");
+    // Use animated gradient fallback
+    document.body.classList.remove("loading");
+    document.body.classList.add("animation-failed");
   }
 }
 
