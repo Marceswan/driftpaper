@@ -1,4 +1,6 @@
 // Landing page - minimal WASM initialization without Elm UI
+import "./landing.css";
+
 let flux;
 
 // Hardcoded settings for the landing page background
@@ -32,17 +34,20 @@ async function initFlux() {
   const canvas = document.getElementById("canvas");
 
   try {
-    if (navigator.gpu) {
+    // Check WebGPU support
+    const hasWebGPU = navigator.gpu && await navigator.gpu.requestAdapter();
+
+    if (hasWebGPU) {
       console.log("Backend: WebGPU");
       // Load WebGPU WASM module
-      const wasm = await import(/* webpackIgnore: true */ "/flux/flux_wasm.js");
-      await wasm.default("/flux/flux_wasm_bg.wasm");
+      const wasm = await import(/* webpackIgnore: true */ "./flux/flux_wasm.js");
+      await wasm.default("./flux/flux_wasm_bg.wasm");
       flux = await new wasm.Flux(settings);
     } else {
       console.log("Backend: WebGL2");
       // Load WebGL2 WASM module
-      const wasm = await import(/* webpackIgnore: true */ "/flux-gl/flux_gl_wasm.js");
-      await wasm.default("/flux-gl/flux_gl_wasm_bg.wasm");
+      const wasm = await import(/* webpackIgnore: true */ "./flux-gl/flux_gl_wasm.js");
+      await wasm.default("./flux-gl/flux_gl_wasm_bg.wasm");
       flux = new wasm.Flux(settings);
     }
 
