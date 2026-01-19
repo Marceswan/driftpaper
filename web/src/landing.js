@@ -43,24 +43,43 @@ async function initFlux() {
   let canvas = document.getElementById("canvas");
   console.log("Canvas dimensions:", canvas.clientWidth, "x", canvas.clientHeight);
 
+  // Test if we can actually create a WebGL2 context
+  const testCtx = canvas.getContext("webgl2");
+  console.log("WebGL2 test context:", testCtx ? "SUCCESS" : "FAILED");
+  if (testCtx) {
+    // Get some debug info
+    console.log("WebGL2 Renderer:", testCtx.getParameter(testCtx.RENDERER));
+    console.log("WebGL2 Vendor:", testCtx.getParameter(testCtx.VENDOR));
+  }
+
   try {
-    // Check WebGPU support
+    // Check WebGPU support - but actually try to get a device, not just adapter
     let hasWebGPU = false;
     try {
-      hasWebGPU = navigator.gpu && await navigator.gpu.requestAdapter();
+      if (navigator.gpu) {
+        const adapter = await navigator.gpu.requestAdapter();
+        if (adapter) {
+          const device = await adapter.requestDevice();
+          if (device) {
+            hasWebGPU = true;
+            device.destroy(); // Clean up test device
+          }
+        }
+      }
     } catch (e) {
       console.log("WebGPU not available:", e);
     }
 
     if (hasWebGPU) {
       console.log("Backend: WebGPU");
+      // Need fresh canvas since we tested WebGL2 above
+      canvas = replaceCanvas();
       const wasm = await import(/* webpackIgnore: true */ "/flux/flux_wasm.js");
       await wasm.default("/flux/flux_wasm_bg.wasm");
       try {
         flux = await new wasm.Flux(settings);
       } catch (webgpuError) {
-        console.log("WebGPU context creation failed, falling back to WebGL2:", webgpuError);
-        // Replace canvas since WebGPU may have tainted it
+        console.log("WebGPU Flux creation failed, falling back to WebGL2:", webgpuError);
         canvas = replaceCanvas();
         hasWebGPU = false;
       }
@@ -68,11 +87,12 @@ async function initFlux() {
 
     if (!hasWebGPU && !flux) {
       console.log("Backend: WebGL2");
-      console.log("WebGL2RenderingContext available:", typeof WebGL2RenderingContext !== "undefined");
+      // Need fresh canvas if we did any testing above
+      canvas = replaceCanvas();
 
       const wasm = await import(/* webpackIgnore: true */ "/flux-gl/flux_gl_wasm.js");
       await wasm.default("/flux-gl/flux_gl_wasm_bg.wasm");
-      console.log("WASM loaded, creating Flux with settings:", JSON.stringify(settings));
+      console.log("WASM loaded, creating Flux...");
       flux = new wasm.Flux(settings);
       console.log("Flux created successfully");
     }
