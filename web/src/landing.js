@@ -30,32 +30,11 @@ const settings = {
   ],
 };
 
-// Check if WebGL2 is supported (simple feature check without creating context)
-function checkWebGL2Support() {
-  // Check if WebGL2RenderingContext exists in the global scope
-  return typeof WebGL2RenderingContext !== "undefined";
-}
-
 async function initFlux() {
   const canvas = document.getElementById("canvas");
 
   // Debug canvas dimensions
-  console.log("Canvas element:", canvas);
   console.log("Canvas clientWidth:", canvas.clientWidth, "clientHeight:", canvas.clientHeight);
-  console.log("Canvas width attr:", canvas.width, "height attr:", canvas.height);
-  console.log("Window innerWidth:", window.innerWidth, "innerHeight:", window.innerHeight);
-  console.log("Device pixel ratio:", window.devicePixelRatio);
-
-  // Set initial canvas size
-  canvas.width = window.innerWidth * window.devicePixelRatio;
-  canvas.height = window.innerHeight * window.devicePixelRatio;
-
-  // Also set CSS dimensions explicitly
-  canvas.style.width = window.innerWidth + "px";
-  canvas.style.height = window.innerHeight + "px";
-
-  // Log after setting
-  console.log("After setting - clientWidth:", canvas.clientWidth, "clientHeight:", canvas.clientHeight);
 
   try {
     // Check WebGPU support
@@ -73,20 +52,9 @@ async function initFlux() {
       flux = await new wasm.Flux(settings);
     } else {
       console.log("Backend: WebGL2");
-
-      // Pre-check WebGL2 support before loading WASM
-      const hasWebGL2 = checkWebGL2Support();
-      console.log("WebGL2 pre-check:", hasWebGL2);
-
-      if (!hasWebGL2) {
-        throw new Error("WebGL2 not supported by this browser");
-      }
-
       const wasm = await import(/* webpackIgnore: true */ "/flux-gl/flux_gl_wasm.js");
       await wasm.default("/flux-gl/flux_gl_wasm_bg.wasm");
-      console.log("WASM loaded, creating Flux instance...");
       flux = new wasm.Flux(settings);
-      console.log("Flux instance created");
     }
 
     // Animation loop
@@ -95,12 +63,10 @@ async function initFlux() {
       window.requestAnimationFrame(animate);
     }
 
-    // Handle canvas resize
+    // Handle canvas resize (WASM handles the actual canvas buffer sizing)
     const resizeObserver = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
       if (width > 0 && height > 0) {
-        canvas.width = width * window.devicePixelRatio;
-        canvas.height = height * window.devicePixelRatio;
         flux.resize(width, height);
       }
     });
@@ -115,7 +81,6 @@ async function initFlux() {
     console.log("Drift animation initialized successfully");
   } catch (error) {
     console.error("Failed to initialize Drift animation:", error);
-    console.error("Error stack:", error.stack);
     // Use animated gradient fallback
     document.body.classList.remove("loading");
     document.body.classList.add("animation-failed");
