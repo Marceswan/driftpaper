@@ -81,6 +81,13 @@ h1 {
     margin-bottom: 2rem;
 }
 
+.download-buttons {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
 .download-btn {
     display: inline-flex;
     align-items: center;
@@ -88,9 +95,9 @@ h1 {
     background: rgba(255, 255, 255, 0.95);
     color: #000;
     text-decoration: none;
-    padding: 1rem 2rem;
+    padding: 0.9rem 1.5rem;
     border-radius: 14px;
-    font-size: 1rem;
+    font-size: 0.95rem;
     font-weight: 600;
     border: 1px solid rgba(255, 255, 255, 0.3);
     box-shadow:
