@@ -2,6 +2,13 @@
 
 All notable changes to DriftPaper will be documented in this file.
 
+## [1.2.0] - 2025-01-20
+
+### Changed
+- **Wallpaper mode is now the default** - No need to specify `--wallpaper` flag
+- Added `--windowed` flag for running in normal window mode (for testing/preview)
+- Simplified LaunchAgent plist (removed unnecessary `--wallpaper` argument)
+
 ## [1.1.0] - 2025-01-20
 
 ### Added

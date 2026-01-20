@@ -169,9 +169,9 @@ fn view_scale_to_value(scale: u32) -> f32 {
 #[derive(Parser, Debug, Clone)]
 #[command(name = "drift", about = "Drift - A live wallpaper inspired by macOS Drift")]
 struct Args {
-    /// Run as desktop wallpaper (behind all windows)
-    #[arg(long, short = 'w')]
-    wallpaper: bool,
+    /// Run in normal window mode instead of as wallpaper
+    #[arg(long)]
+    windowed: bool,
 
     /// Target frames per second (lower = less CPU/GPU, default: 60)
     #[arg(long, default_value = "60")]
@@ -729,7 +729,6 @@ fn enable_launch_at_login() {
     <key>ProgramArguments</key>
     <array>
         <string>{}</string>
-        <string>--wallpaper</string>
         <string>--fps</string>
         <string>30</string>
     </array>
@@ -1690,18 +1689,7 @@ fn setup_menu_bar() {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let mut args = Args::parse();
-
-    // Auto-enable wallpaper mode when launched from DriftPaper.app bundle
-    if !args.wallpaper {
-        if let Ok(exe) = std::env::current_exe() {
-            let path = exe.to_string_lossy();
-            if path.contains("DriftPaper.app/Contents/MacOS/") {
-                log::info!("Launched from DriftPaper.app - enabling wallpaper mode");
-                args.wallpaper = true;
-            }
-        }
-    }
+    let args = Args::parse();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
@@ -1711,7 +1699,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let event_loop = EventLoop::new().unwrap();
 
-    if args.wallpaper {
+    // Wallpaper mode is the default; use --windowed for normal window
+    if !args.windowed {
         // Setup menu bar for wallpaper control (must be on main thread before event loop)
         setup_menu_bar();
 

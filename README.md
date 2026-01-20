@@ -53,8 +53,8 @@ cd driftpaper
 cargo build --release -p flux-desktop
 
 # The binary is at target/release/drift
-# Copy to your app bundle or run directly with --wallpaper flag
-./target/release/drift --wallpaper
+# Run directly (wallpaper mode is the default)
+./target/release/drift
 ```
 
 To create a proper macOS app bundle, copy the binary to:
@@ -75,8 +75,8 @@ cd driftpaper
 cargo build --release -p flux-desktop
 
 # The binary is at target/release/drift.exe
-# Run with --wallpaper flag
-.\target\release\drift.exe --wallpaper
+# Run directly (wallpaper mode is the default)
+.\target\release\drift.exe
 ```
 
 **Note:** On Windows, DriftPaper uses the WorkerW technique to render behind desktop icons. The system tray icon provides the same menu controls as the macOS version.
@@ -107,10 +107,12 @@ Simply launch DriftPaper.app. It will:
 drift --help
 
 Options:
-  -w, --wallpaper    Run as desktop wallpaper (behind all windows)
+      --windowed     Run in normal window mode (not as wallpaper)
       --fps <FPS>    Target frames per second (default: 60)
   -h, --help         Print help
 ```
+
+By default, DriftPaper runs as a wallpaper. Use `--windowed` to run in a normal window for testing or preview.
 
 ## Credits
 
