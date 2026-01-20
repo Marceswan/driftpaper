@@ -24,8 +24,9 @@ use flux::{Flux, Settings};
 static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
 
 // Global settings for menu control
-static CURRENT_COLOR_SCHEME: AtomicU32 = AtomicU32::new(0); // 0=Original, 1=Plasma, 2=Poolside, 3=Freedom
+static CURRENT_COLOR_SCHEME: AtomicU32 = AtomicU32::new(0); // 0=Original, 1=Plasma, 2=Poolside, 3=SpaceGrey
 static CURRENT_DENSITY: AtomicU32 = AtomicU32::new(1); // 0=Sparse, 1=Normal, 2=Dense
+static CURRENT_NOISE_STRENGTH: AtomicU32 = AtomicU32::new(1); // 0=Low, 1=Medium, 2=High, 3=Max
 static SETTINGS_CHANGED: AtomicBool = AtomicBool::new(false);
 
 // Global flag to signal screen configuration changed (resolution, refresh rate, display added/removed)
@@ -36,6 +37,7 @@ static SCREEN_CONFIG_CHANGED: AtomicBool = AtomicBool::new(false);
 struct UserPreferences {
     color_scheme: u32,
     density: u32,
+    noise_strength: u32,
     fps: u32,
 }
 
@@ -44,6 +46,7 @@ impl Default for UserPreferences {
         Self {
             color_scheme: 0,
             density: 1,
+            noise_strength: 1, // Medium
             fps: 30,
         }
     }
@@ -93,6 +96,17 @@ fn scheme_to_color_mode(scheme: u32) -> flux::settings::ColorMode {
         2 => ColorMode::Preset(ColorPreset::Poolside),
         3 => ColorMode::Preset(ColorPreset::SpaceGrey),
         _ => ColorMode::Preset(ColorPreset::Original),
+    }
+}
+
+/// Convert noise strength setting to noise_multiplier value
+fn noise_strength_to_multiplier(strength: u32) -> f32 {
+    match strength {
+        0 => 0.15,  // Low
+        1 => 0.45,  // Medium (default)
+        2 => 0.75,  // High
+        3 => 1.0,   // Max
+        _ => 0.45,
     }
 }
 
@@ -690,6 +704,47 @@ fn setup_menu_bar() {
         }
     }
 
+    extern "C" fn set_noise_low(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_noise_low action triggered");
+        set_noise_strength(0, sender);
+    }
+
+    extern "C" fn set_noise_medium(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_noise_medium action triggered");
+        set_noise_strength(1, sender);
+    }
+
+    extern "C" fn set_noise_high(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_noise_high action triggered");
+        set_noise_strength(2, sender);
+    }
+
+    extern "C" fn set_noise_max(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_noise_max action triggered");
+        set_noise_strength(3, sender);
+    }
+
+    fn set_noise_strength(strength: u32, sender: id) {
+        log::info!("Noise strength changed to: {}", strength);
+        CURRENT_NOISE_STRENGTH.store(strength, Ordering::SeqCst);
+        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+        // Save preference
+        let mut prefs = load_preferences();
+        prefs.noise_strength = strength;
+        save_preferences(&prefs);
+        // Update checkmarks
+        unsafe {
+            let menu: id = msg_send![sender, menu];
+            let count: i64 = msg_send![menu, numberOfItems];
+            for i in 0..count {
+                let item: id = msg_send![menu, itemAtIndex: i];
+                let tag: i64 = msg_send![item, tag];
+                let state: i64 = if tag == strength as i64 { 1 } else { 0 };
+                let _: () = msg_send![item, setState: state];
+            }
+        }
+    }
+
     // Delegate method to update menu when opened
     extern "C" fn menu_will_open(_this: &Object, _cmd: Sel, menu: id) {
         // Update login item state when menu opens
@@ -713,6 +768,7 @@ fn setup_menu_bar() {
         let prefs = load_preferences();
         CURRENT_COLOR_SCHEME.store(prefs.color_scheme, Ordering::SeqCst);
         CURRENT_DENSITY.store(prefs.density, Ordering::SeqCst);
+        CURRENT_NOISE_STRENGTH.store(prefs.noise_strength, Ordering::SeqCst);
 
         // Register our action handler class (also as menu delegate)
         // Use a unique class name to avoid conflicts if app restarts
@@ -737,6 +793,10 @@ fn setup_menu_bar() {
             decl.add_method(sel!(setDensitySparse:), set_density_sparse as extern "C" fn(&Object, Sel, id));
             decl.add_method(sel!(setDensityNormal:), set_density_normal as extern "C" fn(&Object, Sel, id));
             decl.add_method(sel!(setDensityDense:), set_density_dense as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setNoiseLow:), set_noise_low as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setNoiseMedium:), set_noise_medium as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setNoiseHigh:), set_noise_high as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setNoiseMax:), set_noise_max as extern "C" fn(&Object, Sel, id));
             decl.add_method(sel!(menuWillOpen:), menu_will_open as extern "C" fn(&Object, Sel, id));
             let handler_class = decl.register();
             handler = msg_send![handler_class, new];
@@ -840,6 +900,41 @@ fn setup_menu_bar() {
         let _: () = msg_send![density_item, setSubmenu: density_menu];
         menu.addItem_(density_item);
 
+        // ===== Noise Strength Submenu =====
+        let noise_title = NSString::alloc(nil).init_str("Noise Strength");
+        let noise_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+            noise_title,
+            selector(""),
+            NSString::alloc(nil).init_str(""),
+        );
+
+        let noise_menu = NSMenu::new(nil).autorelease();
+        let _: () = msg_send![noise_menu, setAutoenablesItems: NO]; // Prevent auto-disabling
+        let noise_names = ["Low", "Medium", "High", "Max"];
+        let noise_selectors = [
+            sel!(setNoiseLow:),
+            sel!(setNoiseMedium:),
+            sel!(setNoiseHigh:),
+            sel!(setNoiseMax:),
+        ];
+
+        for (i, (name, action)) in noise_names.iter().zip(noise_selectors.iter()).enumerate() {
+            let item_title = NSString::alloc(nil).init_str(name);
+            let item: id = msg_send![class!(NSMenuItem), alloc];
+            let item: id = msg_send![item, initWithTitle:item_title action:*action keyEquivalent:NSString::alloc(nil).init_str("")];
+            let _: () = msg_send![item, setTarget: handler];
+            let _: () = msg_send![item, setTag: i as i64];
+            let _: () = msg_send![item, setEnabled: YES]; // Ensure item is enabled
+            // Set initial checkmark based on saved preference
+            if i as u32 == prefs.noise_strength {
+                let _: () = msg_send![item, setState: 1i64]; // NSOnState
+            }
+            noise_menu.addItem_(item);
+        }
+
+        let _: () = msg_send![noise_item, setSubmenu: noise_menu];
+        menu.addItem_(noise_item);
+
         // ===== Separator =====
         let separator1: id = msg_send![class!(NSMenuItem), separatorItem];
         menu.addItem_(separator1);
@@ -890,16 +985,18 @@ fn setup_menu_bar() {
         let _: () = msg_send![menu, retain];
         let _: () = msg_send![color_menu, retain];
         let _: () = msg_send![density_menu, retain];
+        let _: () = msg_send![noise_menu, retain];
 
         // Store in static to prevent deallocation
         static mut STATUS_ITEM: *mut Object = std::ptr::null_mut();
         STATUS_ITEM = status_item as *mut Object;
 
         log::info!(
-            "Menu bar item created (launch at login: {}, color: {}, density: {})",
+            "Menu bar item created (launch at login: {}, color: {}, density: {}, noise: {})",
             is_launch_at_login_enabled(),
             prefs.color_scheme,
-            prefs.density
+            prefs.density,
+            prefs.noise_strength
         );
     }
 }
@@ -1036,13 +1133,16 @@ async fn run_wallpaper_multi(
     let mut settings = Settings::default();
     settings.color_mode = scheme_to_color_mode(prefs.color_scheme);
     settings.grid_spacing = density_to_grid_spacing(prefs.density);
+    settings.noise_multiplier = noise_strength_to_multiplier(prefs.noise_strength);
     let settings = Arc::new(settings);
 
     log::info!(
-        "Applied settings from preferences: color_scheme={}, density={} (grid_spacing={})",
+        "Applied settings from preferences: color_scheme={}, density={} (grid_spacing={}), noise_strength={} (multiplier={})",
         prefs.color_scheme,
         prefs.density,
-        settings.grid_spacing
+        settings.grid_spacing,
+        prefs.noise_strength,
+        settings.noise_multiplier
     );
 
     // Initialize each display
@@ -1210,11 +1310,13 @@ async fn run_wallpaper_multi(
         if SETTINGS_CHANGED.swap(false, Ordering::SeqCst) {
             let new_color = CURRENT_COLOR_SCHEME.load(Ordering::SeqCst);
             let new_density = CURRENT_DENSITY.load(Ordering::SeqCst);
-            log::info!("Applying live settings update: color={}, density={}", new_color, new_density);
+            let new_noise = CURRENT_NOISE_STRENGTH.load(Ordering::SeqCst);
+            log::info!("Applying live settings update: color={}, density={}, noise={}", new_color, new_density, new_noise);
 
             let mut new_settings = Settings::default();
             new_settings.color_mode = scheme_to_color_mode(new_color);
             new_settings.grid_spacing = density_to_grid_spacing(new_density);
+            new_settings.noise_multiplier = noise_strength_to_multiplier(new_noise);
             let new_settings = Arc::new(new_settings);
 
             for renderer in &mut renderers {
