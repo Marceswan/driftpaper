@@ -2,7 +2,7 @@
 
 All notable changes to DriftPaper will be documented in this file.
 
-## [Unreleased] - Windows Support
+## [1.1.0] - 2025-01-20
 
 ### Added
 - **Windows Support** - Full Windows implementation with system tray
@@ -14,6 +14,7 @@ All notable changes to DriftPaper will be documented in this file.
 ### Changed
 - Preferences path is now platform-aware (macOS: `~/.config`, Windows: `%APPDATA%`)
 - Menu bar/system tray implementation abstracted per platform
+- Updated tray-icon to 0.19, muda to 0.15
 
 ## [1.0.0] - 2025-01-20
 
