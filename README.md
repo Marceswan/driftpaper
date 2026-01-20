@@ -42,6 +42,8 @@ Download the latest release from the [Releases](https://github.com/Marceswan/dri
 
 ### Build from Source
 
+#### macOS
+
 ```sh
 # Clone the repository
 git clone https://github.com/Marceswan/driftpaper.git
@@ -55,14 +57,42 @@ cargo build --release -p flux-desktop
 ./target/release/drift --wallpaper
 ```
 
-### App Bundle
-
 To create a proper macOS app bundle, copy the binary to:
 ```
 /Applications/DriftPaper.app/Contents/MacOS/DriftPaper
 ```
 
 The app automatically enables wallpaper mode when launched from the bundle.
+
+#### Windows
+
+```sh
+# Clone the repository
+git clone https://github.com/Marceswan/driftpaper.git
+cd driftpaper
+
+# Build release
+cargo build --release -p flux-desktop
+
+# The binary is at target/release/drift.exe
+# Run with --wallpaper flag
+.\target\release\drift.exe --wallpaper
+```
+
+**Note:** On Windows, DriftPaper uses the WorkerW technique to render behind desktop icons. The system tray icon provides the same menu controls as the macOS version.
+
+#### Cross-compilation (macOS to Windows)
+
+```sh
+# Install Windows target
+rustup target add x86_64-pc-windows-gnu
+
+# Install mingw-w64 (macOS with Homebrew)
+brew install mingw-w64
+
+# Build for Windows
+cargo build --release -p flux-desktop --target x86_64-pc-windows-gnu
+```
 
 ## Usage
 
