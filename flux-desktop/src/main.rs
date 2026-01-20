@@ -18,6 +18,9 @@ use winit::{
 #[cfg(target_os = "macos")]
 use winit::platform::macos::WindowBuilderExtMacOS;
 
+#[cfg(target_os = "windows")]
+use winit::platform::windows::WindowBuilderExtWindows;
+
 use flux::{Flux, Settings};
 
 // Global flag to signal quit from menu bar
@@ -62,8 +65,21 @@ impl Default for UserPreferences {
 }
 
 fn get_preferences_path() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_default();
-    std::path::PathBuf::from(format!("{}/.config/driftpaper/preferences.json", home))
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        std::path::PathBuf::from(format!("{}/.config/driftpaper/preferences.json", home))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
+        std::path::PathBuf::from(format!("{}\\DriftPaper\\preferences.json", appdata))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        std::path::PathBuf::from(format!("{}/.config/driftpaper/preferences.json", home))
+    }
 }
 
 fn load_preferences() -> UserPreferences {
@@ -499,12 +515,180 @@ fn get_all_displays() -> Vec<DisplayInfo> {
     displays
 }
 
-#[cfg(not(target_os = "macos"))]
-fn setup_wallpaper_window(_window: &Window, _display: &DisplayInfo) {
-    log::warn!("Wallpaper mode is only supported on macOS");
+// ==================== Windows Implementation ====================
+
+#[cfg(target_os = "windows")]
+mod windows_wallpaper {
+    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, FindWindowA, FindWindowExA, GetWindowLongPtrA, SendMessageTimeoutA,
+        SetParent, SetWindowLongPtrA, SetWindowPos, GWL_EXSTYLE, GWL_STYLE,
+        HWND_BOTTOM, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SMTO_NORMAL,
+        WS_CHILD, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+    };
+    use std::ptr::null;
+
+    static mut WORKERW: HWND = 0 as HWND;
+
+    unsafe extern "system" fn enum_windows_proc(hwnd: HWND, _lparam: LPARAM) -> BOOL {
+        let shell_view = FindWindowExA(hwnd, 0 as HWND, b"SHELLDLL_DefView\0".as_ptr(), null());
+        if shell_view != 0 as HWND {
+            WORKERW = FindWindowExA(0 as HWND, hwnd, b"WorkerW\0".as_ptr(), null());
+        }
+        TRUE
+    }
+
+    pub unsafe fn get_workerw() -> HWND {
+        // Find Progman window
+        let progman = FindWindowA(b"Progman\0".as_ptr(), null());
+        if progman == 0 as HWND {
+            log::error!("Failed to find Progman window");
+            return 0 as HWND;
+        }
+
+        // Send message to spawn WorkerW
+        let mut _result: usize = 0;
+        SendMessageTimeoutA(
+            progman,
+            0x052C, // Spawn WorkerW
+            0xD,
+            0,
+            SMTO_NORMAL,
+            1000,
+            &mut _result as *mut usize,
+        );
+
+        // Find the WorkerW window
+        WORKERW = 0 as HWND;
+        EnumWindows(Some(enum_windows_proc), 0);
+
+        if WORKERW == 0 as HWND {
+            log::error!("Failed to find WorkerW window");
+        } else {
+            log::info!("Found WorkerW window: {:?}", WORKERW);
+        }
+
+        WORKERW
+    }
+
+    pub unsafe fn setup_as_wallpaper(hwnd: HWND, x: i32, y: i32, width: i32, height: i32) {
+        let workerw = get_workerw();
+        if workerw == 0 as HWND {
+            log::error!("Cannot set up wallpaper: WorkerW not found");
+            return;
+        }
+
+        // Remove window decorations and make it a child
+        let style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+        SetWindowLongPtrA(hwnd, GWL_STYLE, (style as u32 | WS_CHILD) as isize);
+
+        // Set extended styles for transparency and no activation
+        let ex_style = GetWindowLongPtrA(hwnd, GWL_EXSTYLE);
+        SetWindowLongPtrA(
+            hwnd,
+            GWL_EXSTYLE,
+            (ex_style as u32 | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) as isize,
+        );
+
+        // Parent to WorkerW
+        SetParent(hwnd, workerw);
+
+        // Position the window
+        SetWindowPos(
+            hwnd,
+            HWND_BOTTOM,
+            x,
+            y,
+            width,
+            height,
+            SWP_NOACTIVATE,
+        );
+
+        log::info!("Window set as wallpaper child at {}x{} ({}x{})", x, y, width, height);
+    }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn setup_wallpaper_window(window: &Window, display: &DisplayInfo) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    if let Ok(handle) = window.window_handle() {
+        if let RawWindowHandle::Win32(win32_handle) = handle.as_raw() {
+            let hwnd = win32_handle.hwnd.get() as windows_sys::Win32::Foundation::HWND;
+            unsafe {
+                windows_wallpaper::setup_as_wallpaper(
+                    hwnd,
+                    display.origin_x as i32,
+                    display.origin_y as i32,
+                    display.pixels_wide as i32,
+                    display.pixels_high as i32,
+                );
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn get_all_displays() -> Vec<DisplayInfo> {
+    use windows_sys::Win32::Foundation::{BOOL, LPARAM, RECT, TRUE};
+    use windows_sys::Win32::Graphics::Gdi::{
+        EnumDisplayMonitors, GetMonitorInfoA, HDC, HMONITOR, MONITORINFO,
+    };
+
+    static mut DISPLAYS: Vec<DisplayInfo> = Vec::new();
+
+    unsafe extern "system" fn monitor_enum_proc(
+        hmonitor: HMONITOR,
+        _hdc: HDC,
+        _lprect: *mut RECT,
+        _lparam: LPARAM,
+    ) -> BOOL {
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+
+        if GetMonitorInfoA(hmonitor, &mut info) != 0 {
+            let rect = info.rcMonitor;
+            let width = (rect.right - rect.left) as f64;
+            let height = (rect.bottom - rect.top) as f64;
+
+            DISPLAYS.push(DisplayInfo {
+                origin_x: rect.left as f64,
+                origin_y: rect.top as f64,
+                width,
+                height,
+                pixels_wide: width as u32,
+                pixels_high: height as u32,
+            });
+        }
+        TRUE
+    }
+
+    unsafe {
+        DISPLAYS.clear();
+        EnumDisplayMonitors(0 as HDC, std::ptr::null(), Some(monitor_enum_proc), 0);
+
+        if DISPLAYS.is_empty() {
+            // Fallback to default display
+            vec![DisplayInfo {
+                origin_x: 0.0,
+                origin_y: 0.0,
+                width: 1920.0,
+                height: 1080.0,
+                pixels_wide: 1920,
+                pixels_high: 1080,
+            }]
+        } else {
+            DISPLAYS.clone()
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn setup_wallpaper_window(_window: &Window, _display: &DisplayInfo) {
+    log::warn!("Wallpaper mode is only supported on macOS and Windows");
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn get_all_displays() -> Vec<DisplayInfo> {
     vec![DisplayInfo {
         origin_x: 0.0,
@@ -1270,9 +1454,237 @@ fn setup_menu_bar() {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+// ==================== Windows System Tray ====================
+
+#[cfg(target_os = "windows")]
 fn setup_menu_bar() {
-    log::warn!("Menu bar is only supported on macOS");
+    use tray_icon::{TrayIconBuilder, Icon};
+    use muda::{Menu, MenuItem, Submenu, PredefinedMenuItem, MenuEvent, CheckMenuItem};
+    use std::thread;
+
+    thread::spawn(|| {
+        let prefs = load_preferences();
+
+        // Load preferences into atomics
+        CURRENT_COLOR_SCHEME.store(prefs.color_scheme, Ordering::SeqCst);
+        CURRENT_DENSITY.store(prefs.density, Ordering::SeqCst);
+        CURRENT_NOISE_STRENGTH.store(prefs.noise_strength, Ordering::SeqCst);
+        CURRENT_LINE_LENGTH.store(prefs.line_length, Ordering::SeqCst);
+        CURRENT_LINE_WIDTH.store(prefs.line_width, Ordering::SeqCst);
+        CURRENT_VIEW_SCALE.store(prefs.view_scale, Ordering::SeqCst);
+
+        // Create menu
+        let menu = Menu::new();
+
+        // Color Scheme submenu
+        let color_submenu = Submenu::new("Color Scheme", true);
+        let color_original = CheckMenuItem::new("Original", true, prefs.color_scheme == 0, None);
+        let color_plasma = CheckMenuItem::new("Plasma", true, prefs.color_scheme == 1, None);
+        let color_poolside = CheckMenuItem::new("Poolside", true, prefs.color_scheme == 2, None);
+        let color_spacegrey = CheckMenuItem::new("Space Grey", true, prefs.color_scheme == 3, None);
+        let _ = color_submenu.append(&color_original);
+        let _ = color_submenu.append(&color_plasma);
+        let _ = color_submenu.append(&color_poolside);
+        let _ = color_submenu.append(&color_spacegrey);
+        let _ = menu.append(&color_submenu);
+
+        // Density submenu
+        let density_submenu = Submenu::new("Density", true);
+        let density_sparse = CheckMenuItem::new("Sparse", true, prefs.density == 0, None);
+        let density_normal = CheckMenuItem::new("Normal", true, prefs.density == 1, None);
+        let density_dense = CheckMenuItem::new("Dense", true, prefs.density == 2, None);
+        let _ = density_submenu.append(&density_sparse);
+        let _ = density_submenu.append(&density_normal);
+        let _ = density_submenu.append(&density_dense);
+        let _ = menu.append(&density_submenu);
+
+        // Noise Strength submenu
+        let noise_submenu = Submenu::new("Noise Strength", true);
+        let noise_low = CheckMenuItem::new("Low", true, prefs.noise_strength == 0, None);
+        let noise_medium = CheckMenuItem::new("Medium", true, prefs.noise_strength == 1, None);
+        let noise_high = CheckMenuItem::new("High", true, prefs.noise_strength == 2, None);
+        let noise_max = CheckMenuItem::new("Max", true, prefs.noise_strength == 3, None);
+        let _ = noise_submenu.append(&noise_low);
+        let _ = noise_submenu.append(&noise_medium);
+        let _ = noise_submenu.append(&noise_high);
+        let _ = noise_submenu.append(&noise_max);
+        let _ = menu.append(&noise_submenu);
+
+        // Line Length submenu
+        let length_submenu = Submenu::new("Line Length", true);
+        let length_short = CheckMenuItem::new("Short", true, prefs.line_length == 0, None);
+        let length_medium = CheckMenuItem::new("Medium", true, prefs.line_length == 1, None);
+        let length_long = CheckMenuItem::new("Long", true, prefs.line_length == 2, None);
+        let length_extra = CheckMenuItem::new("Extra Long", true, prefs.line_length == 3, None);
+        let _ = length_submenu.append(&length_short);
+        let _ = length_submenu.append(&length_medium);
+        let _ = length_submenu.append(&length_long);
+        let _ = length_submenu.append(&length_extra);
+        let _ = menu.append(&length_submenu);
+
+        // Line Width submenu
+        let width_submenu = Submenu::new("Line Width", true);
+        let width_thin = CheckMenuItem::new("Thin", true, prefs.line_width == 0, None);
+        let width_medium = CheckMenuItem::new("Medium", true, prefs.line_width == 1, None);
+        let width_thick = CheckMenuItem::new("Thick", true, prefs.line_width == 2, None);
+        let _ = width_submenu.append(&width_thin);
+        let _ = width_submenu.append(&width_medium);
+        let _ = width_submenu.append(&width_thick);
+        let _ = menu.append(&width_submenu);
+
+        // View Scale submenu
+        let scale_submenu = Submenu::new("View Scale", true);
+        let scale_compact = CheckMenuItem::new("Compact", true, prefs.view_scale == 0, None);
+        let scale_normal = CheckMenuItem::new("Normal", true, prefs.view_scale == 1, None);
+        let scale_wide = CheckMenuItem::new("Wide", true, prefs.view_scale == 2, None);
+        let _ = scale_submenu.append(&scale_compact);
+        let _ = scale_submenu.append(&scale_normal);
+        let _ = scale_submenu.append(&scale_wide);
+        let _ = menu.append(&scale_submenu);
+
+        let _ = menu.append(&PredefinedMenuItem::separator());
+
+        // Quit item
+        let quit_item = MenuItem::new("Quit DriftPaper", true, None);
+        let _ = menu.append(&quit_item);
+
+        // Store menu item IDs for event handling
+        let color_ids = [color_original.id().clone(), color_plasma.id().clone(), color_poolside.id().clone(), color_spacegrey.id().clone()];
+        let density_ids = [density_sparse.id().clone(), density_normal.id().clone(), density_dense.id().clone()];
+        let noise_ids = [noise_low.id().clone(), noise_medium.id().clone(), noise_high.id().clone(), noise_max.id().clone()];
+        let length_ids = [length_short.id().clone(), length_medium.id().clone(), length_long.id().clone(), length_extra.id().clone()];
+        let width_ids = [width_thin.id().clone(), width_medium.id().clone(), width_thick.id().clone()];
+        let scale_ids = [scale_compact.id().clone(), scale_normal.id().clone(), scale_wide.id().clone()];
+        let quit_id = quit_item.id().clone();
+
+        // Create a simple icon (white square)
+        let icon_data = vec![255u8; 32 * 32 * 4]; // 32x32 white RGBA
+        let icon = Icon::from_rgba(icon_data, 32, 32).expect("Failed to create icon");
+
+        // Build tray icon
+        let _tray_icon = TrayIconBuilder::new()
+            .with_menu(Box::new(menu))
+            .with_tooltip("DriftPaper")
+            .with_icon(icon)
+            .build()
+            .expect("Failed to create tray icon");
+
+        log::info!("Windows system tray created");
+
+        // Event loop for menu events
+        let menu_channel = MenuEvent::receiver();
+        loop {
+            if let Ok(event) = menu_channel.recv() {
+                let id = event.id;
+
+                // Check color scheme
+                for (i, color_id) in color_ids.iter().enumerate() {
+                    if &id == color_id {
+                        CURRENT_COLOR_SCHEME.store(i as u32, Ordering::SeqCst);
+                        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+                        let mut prefs = load_preferences();
+                        prefs.color_scheme = i as u32;
+                        save_preferences(&prefs);
+                        // Update checkmarks
+                        color_original.set_checked(i == 0);
+                        color_plasma.set_checked(i == 1);
+                        color_poolside.set_checked(i == 2);
+                        color_spacegrey.set_checked(i == 3);
+                        log::info!("Color scheme changed to {}", i);
+                    }
+                }
+
+                // Check density
+                for (i, density_id) in density_ids.iter().enumerate() {
+                    if &id == density_id {
+                        CURRENT_DENSITY.store(i as u32, Ordering::SeqCst);
+                        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+                        let mut prefs = load_preferences();
+                        prefs.density = i as u32;
+                        save_preferences(&prefs);
+                        density_sparse.set_checked(i == 0);
+                        density_normal.set_checked(i == 1);
+                        density_dense.set_checked(i == 2);
+                        log::info!("Density changed to {}", i);
+                    }
+                }
+
+                // Check noise
+                for (i, noise_id) in noise_ids.iter().enumerate() {
+                    if &id == noise_id {
+                        CURRENT_NOISE_STRENGTH.store(i as u32, Ordering::SeqCst);
+                        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+                        let mut prefs = load_preferences();
+                        prefs.noise_strength = i as u32;
+                        save_preferences(&prefs);
+                        noise_low.set_checked(i == 0);
+                        noise_medium.set_checked(i == 1);
+                        noise_high.set_checked(i == 2);
+                        noise_max.set_checked(i == 3);
+                        log::info!("Noise strength changed to {}", i);
+                    }
+                }
+
+                // Check line length
+                for (i, length_id) in length_ids.iter().enumerate() {
+                    if &id == length_id {
+                        CURRENT_LINE_LENGTH.store(i as u32, Ordering::SeqCst);
+                        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+                        let mut prefs = load_preferences();
+                        prefs.line_length = i as u32;
+                        save_preferences(&prefs);
+                        length_short.set_checked(i == 0);
+                        length_medium.set_checked(i == 1);
+                        length_long.set_checked(i == 2);
+                        length_extra.set_checked(i == 3);
+                        log::info!("Line length changed to {}", i);
+                    }
+                }
+
+                // Check line width
+                for (i, width_id) in width_ids.iter().enumerate() {
+                    if &id == width_id {
+                        CURRENT_LINE_WIDTH.store(i as u32, Ordering::SeqCst);
+                        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+                        let mut prefs = load_preferences();
+                        prefs.line_width = i as u32;
+                        save_preferences(&prefs);
+                        width_thin.set_checked(i == 0);
+                        width_medium.set_checked(i == 1);
+                        width_thick.set_checked(i == 2);
+                        log::info!("Line width changed to {}", i);
+                    }
+                }
+
+                // Check view scale
+                for (i, scale_id) in scale_ids.iter().enumerate() {
+                    if &id == scale_id {
+                        CURRENT_VIEW_SCALE.store(i as u32, Ordering::SeqCst);
+                        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+                        let mut prefs = load_preferences();
+                        prefs.view_scale = i as u32;
+                        save_preferences(&prefs);
+                        scale_compact.set_checked(i == 0);
+                        scale_normal.set_checked(i == 1);
+                        scale_wide.set_checked(i == 2);
+                        log::info!("View scale changed to {}", i);
+                    }
+                }
+
+                // Check quit
+                if id == quit_id {
+                    log::info!("Quit requested from tray");
+                    SHOULD_QUIT.store(true, Ordering::SeqCst);
+                    break;
+                }
+            }
+        }
+    });
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn setup_menu_bar() {
+    log::warn!("System tray is only supported on macOS and Windows");
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

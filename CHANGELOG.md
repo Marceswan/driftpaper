@@ -2,6 +2,19 @@
 
 All notable changes to DriftPaper will be documented in this file.
 
+## [Unreleased] - Windows Support
+
+### Added
+- **Windows Support** - Full Windows implementation with system tray
+  - WorkerW technique for rendering behind desktop icons
+  - Multi-monitor support via EnumDisplayMonitors
+  - System tray with all menu controls (same as macOS)
+  - Preferences stored in `%APPDATA%\DriftPaper\preferences.json`
+
+### Changed
+- Preferences path is now platform-aware (macOS: `~/.config`, Windows: `%APPDATA%`)
+- Menu bar/system tray implementation abstracted per platform
+
 ## [1.0.0] - 2025-01-20
 
 ### Added
