@@ -1,0 +1,17 @@
+/drafts
+mutagen.*
+
+# Rust
+/target
+
+# Release
+/result*
+
+# Dev shell
+/.direnv
+
+# macOS
+.DS_Store
+
+# Temp extracted files
+AppIcons_extracted/
