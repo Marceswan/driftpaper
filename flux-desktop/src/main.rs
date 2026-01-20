@@ -27,6 +27,9 @@ static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
 static CURRENT_COLOR_SCHEME: AtomicU32 = AtomicU32::new(0); // 0=Original, 1=Plasma, 2=Poolside, 3=SpaceGrey
 static CURRENT_DENSITY: AtomicU32 = AtomicU32::new(1); // 0=Sparse, 1=Normal, 2=Dense
 static CURRENT_NOISE_STRENGTH: AtomicU32 = AtomicU32::new(1); // 0=Low, 1=Medium, 2=High, 3=Max
+static CURRENT_LINE_LENGTH: AtomicU32 = AtomicU32::new(1); // 0=Short, 1=Medium, 2=Long, 3=Extra Long
+static CURRENT_LINE_WIDTH: AtomicU32 = AtomicU32::new(1); // 0=Thin, 1=Medium, 2=Thick
+static CURRENT_VIEW_SCALE: AtomicU32 = AtomicU32::new(1); // 0=Compact, 1=Normal, 2=Wide
 static SETTINGS_CHANGED: AtomicBool = AtomicBool::new(false);
 
 // Global flag to signal screen configuration changed (resolution, refresh rate, display added/removed)
@@ -38,6 +41,9 @@ struct UserPreferences {
     color_scheme: u32,
     density: u32,
     noise_strength: u32,
+    line_length: u32,
+    line_width: u32,
+    view_scale: u32,
     fps: u32,
 }
 
@@ -47,6 +53,9 @@ impl Default for UserPreferences {
             color_scheme: 0,
             density: 1,
             noise_strength: 1, // Medium
+            line_length: 1,    // Medium
+            line_width: 1,     // Medium
+            view_scale: 1,     // Normal
             fps: 30,
         }
     }
@@ -107,6 +116,37 @@ fn noise_strength_to_multiplier(strength: u32) -> f32 {
         2 => 0.75,  // High
         3 => 1.0,   // Max
         _ => 0.45,
+    }
+}
+
+/// Convert line length setting to line_length value
+fn line_length_to_value(length: u32) -> f32 {
+    match length {
+        0 => 200.0,   // Short
+        1 => 450.0,   // Medium (default)
+        2 => 700.0,   // Long
+        3 => 1000.0,  // Extra Long
+        _ => 450.0,
+    }
+}
+
+/// Convert line width setting to line_width value
+fn line_width_to_value(width: u32) -> f32 {
+    match width {
+        0 => 4.0,   // Thin
+        1 => 9.0,   // Medium (default)
+        2 => 16.0,  // Thick
+        _ => 9.0,
+    }
+}
+
+/// Convert view scale setting to view_scale value
+fn view_scale_to_value(scale: u32) -> f32 {
+    match scale {
+        0 => 1.0,   // Compact
+        1 => 1.6,   // Normal (default)
+        2 => 2.2,   // Wide
+        _ => 1.6,
     }
 }
 
@@ -745,6 +785,116 @@ fn setup_menu_bar() {
         }
     }
 
+    // ===== Line Length Handlers =====
+    extern "C" fn set_line_short(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_line_short action triggered");
+        set_line_length(0, sender);
+    }
+
+    extern "C" fn set_line_medium(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_line_medium action triggered");
+        set_line_length(1, sender);
+    }
+
+    extern "C" fn set_line_long(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_line_long action triggered");
+        set_line_length(2, sender);
+    }
+
+    extern "C" fn set_line_extra_long(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_line_extra_long action triggered");
+        set_line_length(3, sender);
+    }
+
+    fn set_line_length(length: u32, sender: id) {
+        log::info!("Line length changed to: {}", length);
+        CURRENT_LINE_LENGTH.store(length, Ordering::SeqCst);
+        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+        let mut prefs = load_preferences();
+        prefs.line_length = length;
+        save_preferences(&prefs);
+        unsafe {
+            let menu: id = msg_send![sender, menu];
+            let count: i64 = msg_send![menu, numberOfItems];
+            for i in 0..count {
+                let item: id = msg_send![menu, itemAtIndex: i];
+                let tag: i64 = msg_send![item, tag];
+                let state: i64 = if tag == length as i64 { 1 } else { 0 };
+                let _: () = msg_send![item, setState: state];
+            }
+        }
+    }
+
+    // ===== Line Width Handlers =====
+    extern "C" fn set_width_thin(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_width_thin action triggered");
+        set_line_width(0, sender);
+    }
+
+    extern "C" fn set_width_medium(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_width_medium action triggered");
+        set_line_width(1, sender);
+    }
+
+    extern "C" fn set_width_thick(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_width_thick action triggered");
+        set_line_width(2, sender);
+    }
+
+    fn set_line_width(width: u32, sender: id) {
+        log::info!("Line width changed to: {}", width);
+        CURRENT_LINE_WIDTH.store(width, Ordering::SeqCst);
+        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+        let mut prefs = load_preferences();
+        prefs.line_width = width;
+        save_preferences(&prefs);
+        unsafe {
+            let menu: id = msg_send![sender, menu];
+            let count: i64 = msg_send![menu, numberOfItems];
+            for i in 0..count {
+                let item: id = msg_send![menu, itemAtIndex: i];
+                let tag: i64 = msg_send![item, tag];
+                let state: i64 = if tag == width as i64 { 1 } else { 0 };
+                let _: () = msg_send![item, setState: state];
+            }
+        }
+    }
+
+    // ===== View Scale Handlers =====
+    extern "C" fn set_scale_compact(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_scale_compact action triggered");
+        set_view_scale(0, sender);
+    }
+
+    extern "C" fn set_scale_normal(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_scale_normal action triggered");
+        set_view_scale(1, sender);
+    }
+
+    extern "C" fn set_scale_wide(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_scale_wide action triggered");
+        set_view_scale(2, sender);
+    }
+
+    fn set_view_scale(scale: u32, sender: id) {
+        log::info!("View scale changed to: {}", scale);
+        CURRENT_VIEW_SCALE.store(scale, Ordering::SeqCst);
+        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+        let mut prefs = load_preferences();
+        prefs.view_scale = scale;
+        save_preferences(&prefs);
+        unsafe {
+            let menu: id = msg_send![sender, menu];
+            let count: i64 = msg_send![menu, numberOfItems];
+            for i in 0..count {
+                let item: id = msg_send![menu, itemAtIndex: i];
+                let tag: i64 = msg_send![item, tag];
+                let state: i64 = if tag == scale as i64 { 1 } else { 0 };
+                let _: () = msg_send![item, setState: state];
+            }
+        }
+    }
+
     // Delegate method to update menu when opened
     extern "C" fn menu_will_open(_this: &Object, _cmd: Sel, menu: id) {
         // Update login item state when menu opens
@@ -769,6 +919,9 @@ fn setup_menu_bar() {
         CURRENT_COLOR_SCHEME.store(prefs.color_scheme, Ordering::SeqCst);
         CURRENT_DENSITY.store(prefs.density, Ordering::SeqCst);
         CURRENT_NOISE_STRENGTH.store(prefs.noise_strength, Ordering::SeqCst);
+        CURRENT_LINE_LENGTH.store(prefs.line_length, Ordering::SeqCst);
+        CURRENT_LINE_WIDTH.store(prefs.line_width, Ordering::SeqCst);
+        CURRENT_VIEW_SCALE.store(prefs.view_scale, Ordering::SeqCst);
 
         // Register our action handler class (also as menu delegate)
         // Use a unique class name to avoid conflicts if app restarts
@@ -797,6 +950,16 @@ fn setup_menu_bar() {
             decl.add_method(sel!(setNoiseMedium:), set_noise_medium as extern "C" fn(&Object, Sel, id));
             decl.add_method(sel!(setNoiseHigh:), set_noise_high as extern "C" fn(&Object, Sel, id));
             decl.add_method(sel!(setNoiseMax:), set_noise_max as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setLineShort:), set_line_short as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setLineMedium:), set_line_medium as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setLineLong:), set_line_long as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setLineExtraLong:), set_line_extra_long as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setWidthThin:), set_width_thin as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setWidthMedium:), set_width_medium as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setWidthThick:), set_width_thick as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setScaleCompact:), set_scale_compact as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setScaleNormal:), set_scale_normal as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setScaleWide:), set_scale_wide as extern "C" fn(&Object, Sel, id));
             decl.add_method(sel!(menuWillOpen:), menu_will_open as extern "C" fn(&Object, Sel, id));
             let handler_class = decl.register();
             handler = msg_send![handler_class, new];
@@ -935,6 +1098,106 @@ fn setup_menu_bar() {
         let _: () = msg_send![noise_item, setSubmenu: noise_menu];
         menu.addItem_(noise_item);
 
+        // ===== Line Length Submenu =====
+        let line_length_title = NSString::alloc(nil).init_str("Line Length");
+        let line_length_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+            line_length_title,
+            selector(""),
+            NSString::alloc(nil).init_str(""),
+        );
+
+        let line_length_menu = NSMenu::new(nil).autorelease();
+        let _: () = msg_send![line_length_menu, setAutoenablesItems: NO];
+        let line_length_names = ["Short", "Medium", "Long", "Extra Long"];
+        let line_length_selectors = [
+            sel!(setLineShort:),
+            sel!(setLineMedium:),
+            sel!(setLineLong:),
+            sel!(setLineExtraLong:),
+        ];
+
+        for (i, (name, action)) in line_length_names.iter().zip(line_length_selectors.iter()).enumerate() {
+            let item_title = NSString::alloc(nil).init_str(name);
+            let item: id = msg_send![class!(NSMenuItem), alloc];
+            let item: id = msg_send![item, initWithTitle:item_title action:*action keyEquivalent:NSString::alloc(nil).init_str("")];
+            let _: () = msg_send![item, setTarget: handler];
+            let _: () = msg_send![item, setTag: i as i64];
+            let _: () = msg_send![item, setEnabled: YES];
+            if i as u32 == prefs.line_length {
+                let _: () = msg_send![item, setState: 1i64];
+            }
+            line_length_menu.addItem_(item);
+        }
+
+        let _: () = msg_send![line_length_item, setSubmenu: line_length_menu];
+        menu.addItem_(line_length_item);
+
+        // ===== Line Width Submenu =====
+        let line_width_title = NSString::alloc(nil).init_str("Line Width");
+        let line_width_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+            line_width_title,
+            selector(""),
+            NSString::alloc(nil).init_str(""),
+        );
+
+        let line_width_menu = NSMenu::new(nil).autorelease();
+        let _: () = msg_send![line_width_menu, setAutoenablesItems: NO];
+        let line_width_names = ["Thin", "Medium", "Thick"];
+        let line_width_selectors = [
+            sel!(setWidthThin:),
+            sel!(setWidthMedium:),
+            sel!(setWidthThick:),
+        ];
+
+        for (i, (name, action)) in line_width_names.iter().zip(line_width_selectors.iter()).enumerate() {
+            let item_title = NSString::alloc(nil).init_str(name);
+            let item: id = msg_send![class!(NSMenuItem), alloc];
+            let item: id = msg_send![item, initWithTitle:item_title action:*action keyEquivalent:NSString::alloc(nil).init_str("")];
+            let _: () = msg_send![item, setTarget: handler];
+            let _: () = msg_send![item, setTag: i as i64];
+            let _: () = msg_send![item, setEnabled: YES];
+            if i as u32 == prefs.line_width {
+                let _: () = msg_send![item, setState: 1i64];
+            }
+            line_width_menu.addItem_(item);
+        }
+
+        let _: () = msg_send![line_width_item, setSubmenu: line_width_menu];
+        menu.addItem_(line_width_item);
+
+        // ===== View Scale Submenu =====
+        let view_scale_title = NSString::alloc(nil).init_str("View Scale");
+        let view_scale_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+            view_scale_title,
+            selector(""),
+            NSString::alloc(nil).init_str(""),
+        );
+
+        let view_scale_menu = NSMenu::new(nil).autorelease();
+        let _: () = msg_send![view_scale_menu, setAutoenablesItems: NO];
+        let view_scale_names = ["Compact", "Normal", "Wide"];
+        let view_scale_selectors = [
+            sel!(setScaleCompact:),
+            sel!(setScaleNormal:),
+            sel!(setScaleWide:),
+        ];
+
+        for (i, (name, action)) in view_scale_names.iter().zip(view_scale_selectors.iter()).enumerate() {
+            let item_title = NSString::alloc(nil).init_str(name);
+            let item: id = msg_send![class!(NSMenuItem), alloc];
+            let item: id = msg_send![item, initWithTitle:item_title action:*action keyEquivalent:NSString::alloc(nil).init_str("")];
+            let _: () = msg_send![item, setTarget: handler];
+            let _: () = msg_send![item, setTag: i as i64];
+            let _: () = msg_send![item, setEnabled: YES];
+            if i as u32 == prefs.view_scale {
+                let _: () = msg_send![item, setState: 1i64];
+            }
+            view_scale_menu.addItem_(item);
+        }
+
+        let _: () = msg_send![view_scale_item, setSubmenu: view_scale_menu];
+        menu.addItem_(view_scale_item);
+
         // ===== Separator =====
         let separator1: id = msg_send![class!(NSMenuItem), separatorItem];
         menu.addItem_(separator1);
@@ -986,17 +1249,23 @@ fn setup_menu_bar() {
         let _: () = msg_send![color_menu, retain];
         let _: () = msg_send![density_menu, retain];
         let _: () = msg_send![noise_menu, retain];
+        let _: () = msg_send![line_length_menu, retain];
+        let _: () = msg_send![line_width_menu, retain];
+        let _: () = msg_send![view_scale_menu, retain];
 
         // Store in static to prevent deallocation
         static mut STATUS_ITEM: *mut Object = std::ptr::null_mut();
         STATUS_ITEM = status_item as *mut Object;
 
         log::info!(
-            "Menu bar item created (launch at login: {}, color: {}, density: {}, noise: {})",
+            "Menu bar item created (launch at login: {}, color: {}, density: {}, noise: {}, line_length: {}, line_width: {}, view_scale: {})",
             is_launch_at_login_enabled(),
             prefs.color_scheme,
             prefs.density,
-            prefs.noise_strength
+            prefs.noise_strength,
+            prefs.line_length,
+            prefs.line_width,
+            prefs.view_scale
         );
     }
 }
@@ -1134,15 +1403,19 @@ async fn run_wallpaper_multi(
     settings.color_mode = scheme_to_color_mode(prefs.color_scheme);
     settings.grid_spacing = density_to_grid_spacing(prefs.density);
     settings.noise_multiplier = noise_strength_to_multiplier(prefs.noise_strength);
+    settings.line_length = line_length_to_value(prefs.line_length);
+    settings.line_width = line_width_to_value(prefs.line_width);
+    settings.view_scale = view_scale_to_value(prefs.view_scale);
     let settings = Arc::new(settings);
 
     log::info!(
-        "Applied settings from preferences: color_scheme={}, density={} (grid_spacing={}), noise_strength={} (multiplier={})",
+        "Applied settings from preferences: color={}, density={}, noise={}, line_length={}, line_width={}, view_scale={}",
         prefs.color_scheme,
         prefs.density,
-        settings.grid_spacing,
         prefs.noise_strength,
-        settings.noise_multiplier
+        prefs.line_length,
+        prefs.line_width,
+        prefs.view_scale
     );
 
     // Initialize each display
@@ -1311,12 +1584,19 @@ async fn run_wallpaper_multi(
             let new_color = CURRENT_COLOR_SCHEME.load(Ordering::SeqCst);
             let new_density = CURRENT_DENSITY.load(Ordering::SeqCst);
             let new_noise = CURRENT_NOISE_STRENGTH.load(Ordering::SeqCst);
-            log::info!("Applying live settings update: color={}, density={}, noise={}", new_color, new_density, new_noise);
+            let new_line_length = CURRENT_LINE_LENGTH.load(Ordering::SeqCst);
+            let new_line_width = CURRENT_LINE_WIDTH.load(Ordering::SeqCst);
+            let new_view_scale = CURRENT_VIEW_SCALE.load(Ordering::SeqCst);
+            log::info!("Applying live settings update: color={}, density={}, noise={}, line_length={}, line_width={}, view_scale={}",
+                new_color, new_density, new_noise, new_line_length, new_line_width, new_view_scale);
 
             let mut new_settings = Settings::default();
             new_settings.color_mode = scheme_to_color_mode(new_color);
             new_settings.grid_spacing = density_to_grid_spacing(new_density);
             new_settings.noise_multiplier = noise_strength_to_multiplier(new_noise);
+            new_settings.line_length = line_length_to_value(new_line_length);
+            new_settings.line_width = line_width_to_value(new_line_width);
+            new_settings.view_scale = view_scale_to_value(new_view_scale);
             let new_settings = Arc::new(new_settings);
 
             for renderer in &mut renderers {
