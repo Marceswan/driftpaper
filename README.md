@@ -1,108 +1,96 @@
 <p align="center">
-  <a href="https://flux.sandydoo.me/">
-    <img width="100%" src="https://assets.sandydoo.me/flux/social-header-2022-07-07.webp" alt="Flux" />
-  </a>
+  <img width="100%" src="https://assets.sandydoo.me/flux/social-header-2022-07-07.webp" alt="DriftPaper" />
 
-  <p align="center"><b>A open-source tribute to the macOS Drift screensaver.</b></p>
-
-  <p align="center">
-    <a href="https://sandydoo.gumroad.com/l/flux">Buy&nbsp;a&nbsp;screensaver</a>
-    &nbsp;·&nbsp;
-    <a href="https://flux.sandydoo.me/">Launch&nbsp;in&nbsp;browser</a>
-    &nbsp;·&nbsp;
-    <a href="https://www.youtube.com/watch?v=dURktAeZDa8">Watch&nbsp;recording</a>
-    &nbsp;·&nbsp;
-    <a href="https://x.com/sandydoo/">Follow&nbsp;me&nbsp;on&nbsp;X</a>
-  </p>
+  <h1 align="center">DriftPaper</h1>
+  <p align="center"><b>A live wallpaper for macOS inspired by the Drift screensaver.</b></p>
 </p>
 
 <br>
 
+## Features
 
-## Screensavers
+DriftPaper runs as a menu bar app, rendering a beautiful fluid simulation as your desktop wallpaper. All settings are accessible from the menu bar with live preview - no restart required.
 
-#### [Buy Flux as a Windows screensaver →][store]
-Help support development by letting your PC idle with style.
+### Menu Bar Controls
 
-## Backstory
+| Setting | Options |
+|---------|---------|
+| **Color Scheme** | Original, Plasma, Poolside, Space Grey |
+| **Density** | Sparse, Normal, Dense |
+| **Noise Strength** | Low, Medium, High, Max |
+| **Line Length** | Short, Medium, Long, Extra Long |
+| **Line Width** | Thin, Medium, Thick |
+| **View Scale** | Compact, Normal, Wide |
 
-I’ve been enamoured with the Drift screensaver ever since it came out with macOS Catalina. It’s mesmerizing. I feel like it’s become an instant classic, and, dare I say, it might stand to dethrone the venerable Flurry screensaver. Hats off to the folk at Apple responsible for this gem 🙌.
+Additional options:
+- **Launch at Login** - Automatically start DriftPaper when you log in
+- **Quit** - Exit the application
 
-This is an attempt at capturing that magic and bottling it up in a more portable vessel. This isn’t a port though; the source code for the original is locked up in a spaceship somewhere in Cupertino. Instead, consider this a delicate blend of detective work and artistic liberty.
+### Technical Details
 
-## Reviews
+- Renders behind all windows at desktop level
+- Click-through enabled - interact with your desktop normally
+- Multi-display support - one window per display
+- Low power mode - optimized for battery life
+- Settings persist across sessions
 
-> “You’re the first person I’ve seen take this much of an interest in how we made Drift and it looks like you nailed it… minus maybe one or two little elements that give it some extra magic 😉 Great work!”
+## Installation
+
+### Download
+
+Download the latest release from the [Releases](https://github.com/Marceswan/driftpaper/releases) page.
+
+### Build from Source
+
+```sh
+# Clone the repository
+git clone https://github.com/Marceswan/driftpaper.git
+cd driftpaper
+
+# Build release
+cargo build --release -p flux-desktop
+
+# The binary is at target/release/drift
+# Copy to your app bundle or run directly with --wallpaper flag
+./target/release/drift --wallpaper
+```
+
+### App Bundle
+
+To create a proper macOS app bundle, copy the binary to:
+```
+/Applications/DriftPaper.app/Contents/MacOS/DriftPaper
+```
+
+The app automatically enables wallpaper mode when launched from the bundle.
+
+## Usage
+
+Simply launch DriftPaper.app. It will:
+1. Appear in your menu bar as "Drift"
+2. Render the wallpaper on all displays
+3. Save your preferences to `~/.config/driftpaper/preferences.json`
+
+### Command Line Options
+
+```sh
+drift --help
+
+Options:
+  -w, --wallpaper    Run as desktop wallpaper (behind all windows)
+      --fps <FPS>    Target frames per second (default: 60)
+  -h, --help         Print help
+```
+
+## Credits
+
+DriftPaper is built on [Flux](https://github.com/sandydoo/flux) by [Sander Melnikov](https://github.com/sandydoo/) - an open-source tribute to the macOS Drift screensaver.
+
+> "You're the first person I've seen take this much of an interest in how we made Drift and it looks like you nailed it… minus maybe one or two little elements that give it some extra magic. Great work!"
 > — anonymous Apple employee
-
-## Samples
-
-![A render of Flux in all 4 default color schemes](https://assets.sandydoo.me/flux/samples/flux-all-at-1280-800-logical.webp)
-
-![A render of Flux in the “Original” color scheme](https://assets.sandydoo.me/flux/samples/flux-original-at-1280-800-logical.webp)
-
-![A render of Flux in the “Plasma” color scheme](https://assets.sandydoo.me/flux/samples/flux-plasma-at-1280-800-logical.webp)
-
-![A render of Flux in the “Poolside” color scheme](https://assets.sandydoo.me/flux/samples/flux-poolside-at-1280-800-logical.webp)
-
-![A render of Flux in the “Freedom” color scheme](https://assets.sandydoo.me/flux/samples/flux-freedom-at-1280-800-logical.webp)
-
-## Build
-
-### Using Nix
-
-Build a new release in the `result` folder:
-
-```sh
-nix build
-```
-
-Or open a development shell with all the neccessary tools:
-
-```sh
-nix develop
-
-cd web
-pnpm serve
-```
-
-### Manual build
-
-There’s a few things you’re going to have to install.
-
-- rustc with `wasm32-unknown-unknown` as a target
-- cargo
-- wasm-pack
-- node
-- pnpm
-- elm
-
-How you get these dependencies depends on the operating system you’re running. Here’s an example for macOS and Linux using rustup:
-
-```sh
-rustup toolchain install stable
-rustup target wasm32-unknown-unknown
-
-cd web
-pnpm install
-```
-
-Run a development server from the `web` folder:
-```sh
-pnpm serve
-```
-
-Build a release:
-```sh
-pnpm build
-```
 
 ## License
 
-[MIT][license-url] © [Sander Melnikov][maintainer-url].
+[MIT](LICENSE) © [Sander Melnikov](https://github.com/sandydoo/) (original Flux project)
 
-
-[license-url]: https://github.com/sandydoo/flux/blob/main/LICENSE
-[maintainer-url]: https://github.com/sandydoo/
-[x]: https://x.com/sandydoo/
-[store]: https://sandydoo.gumroad.com/l/flux
+Desktop app modifications by [Marc Swan](https://github.com/Marceswan/).
