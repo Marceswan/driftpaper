@@ -33,6 +33,7 @@ static CURRENT_NOISE_STRENGTH: AtomicU32 = AtomicU32::new(1); // 0=Low, 1=Medium
 static CURRENT_LINE_LENGTH: AtomicU32 = AtomicU32::new(1); // 0=Short, 1=Medium, 2=Long, 3=Extra Long
 static CURRENT_LINE_WIDTH: AtomicU32 = AtomicU32::new(1); // 0=Thin, 1=Medium, 2=Thick
 static CURRENT_VIEW_SCALE: AtomicU32 = AtomicU32::new(1); // 0=Compact, 1=Normal, 2=Wide
+static CURRENT_BRIGHTNESS: AtomicU32 = AtomicU32::new(1); // 0=Dim, 1=Normal, 2=Bright, 3=Vivid
 static SETTINGS_CHANGED: AtomicBool = AtomicBool::new(false);
 
 // Global flag to signal screen configuration changed (resolution, refresh rate, display added/removed)
@@ -47,6 +48,7 @@ struct UserPreferences {
     line_length: u32,
     line_width: u32,
     view_scale: u32,
+    brightness: u32,
     fps: u32,
 }
 
@@ -59,6 +61,7 @@ impl Default for UserPreferences {
             line_length: 1,    // Medium
             line_width: 1,     // Medium
             view_scale: 1,     // Normal
+            brightness: 1,     // Normal
             fps: 30,
         }
     }
@@ -163,6 +166,17 @@ fn view_scale_to_value(scale: u32) -> f32 {
         1 => 1.6,   // Normal (default)
         2 => 2.2,   // Wide
         _ => 1.6,
+    }
+}
+
+/// Convert brightness setting to multiplier value
+fn brightness_to_multiplier(brightness: u32) -> f32 {
+    match brightness {
+        0 => 0.5,   // Dim
+        1 => 1.0,   // Normal (default)
+        2 => 2.0,   // Bright
+        3 => 3.5,   // Vivid
+        _ => 1.0,
     }
 }
 
@@ -1078,6 +1092,46 @@ fn setup_menu_bar() {
         }
     }
 
+    // ===== Brightness Handlers =====
+    extern "C" fn set_brightness_dim(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_brightness_dim action triggered");
+        set_brightness(0, sender);
+    }
+
+    extern "C" fn set_brightness_normal(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_brightness_normal action triggered");
+        set_brightness(1, sender);
+    }
+
+    extern "C" fn set_brightness_bright(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_brightness_bright action triggered");
+        set_brightness(2, sender);
+    }
+
+    extern "C" fn set_brightness_vivid(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_brightness_vivid action triggered");
+        set_brightness(3, sender);
+    }
+
+    fn set_brightness(brightness: u32, sender: id) {
+        log::info!("Brightness changed to: {}", brightness);
+        CURRENT_BRIGHTNESS.store(brightness, Ordering::SeqCst);
+        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+        let mut prefs = load_preferences();
+        prefs.brightness = brightness;
+        save_preferences(&prefs);
+        unsafe {
+            let menu: id = msg_send![sender, menu];
+            let count: i64 = msg_send![menu, numberOfItems];
+            for i in 0..count {
+                let item: id = msg_send![menu, itemAtIndex: i];
+                let tag: i64 = msg_send![item, tag];
+                let state: i64 = if tag == brightness as i64 { 1 } else { 0 };
+                let _: () = msg_send![item, setState: state];
+            }
+        }
+    }
+
     // Delegate method to update menu when opened
     extern "C" fn menu_will_open(_this: &Object, _cmd: Sel, menu: id) {
         // Update login item state when menu opens
@@ -1105,6 +1159,7 @@ fn setup_menu_bar() {
         CURRENT_LINE_LENGTH.store(prefs.line_length, Ordering::SeqCst);
         CURRENT_LINE_WIDTH.store(prefs.line_width, Ordering::SeqCst);
         CURRENT_VIEW_SCALE.store(prefs.view_scale, Ordering::SeqCst);
+        CURRENT_BRIGHTNESS.store(prefs.brightness, Ordering::SeqCst);
 
         // Register our action handler class (also as menu delegate)
         // Use a unique class name to avoid conflicts if app restarts
@@ -1143,6 +1198,10 @@ fn setup_menu_bar() {
             decl.add_method(sel!(setScaleCompact:), set_scale_compact as extern "C" fn(&Object, Sel, id));
             decl.add_method(sel!(setScaleNormal:), set_scale_normal as extern "C" fn(&Object, Sel, id));
             decl.add_method(sel!(setScaleWide:), set_scale_wide as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setBrightnessDim:), set_brightness_dim as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setBrightnessNormal:), set_brightness_normal as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setBrightnessBright:), set_brightness_bright as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setBrightnessVivid:), set_brightness_vivid as extern "C" fn(&Object, Sel, id));
             decl.add_method(sel!(menuWillOpen:), menu_will_open as extern "C" fn(&Object, Sel, id));
             let handler_class = decl.register();
             handler = msg_send![handler_class, new];
@@ -1381,6 +1440,41 @@ fn setup_menu_bar() {
         let _: () = msg_send![view_scale_item, setSubmenu: view_scale_menu];
         menu.addItem_(view_scale_item);
 
+        // ===== Brightness Submenu =====
+        let brightness_title = NSString::alloc(nil).init_str("Brightness");
+        let brightness_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+            brightness_title,
+            selector(""),
+            NSString::alloc(nil).init_str(""),
+        );
+
+        let brightness_menu = NSMenu::new(nil).autorelease();
+        let _: () = msg_send![brightness_menu, setAutoenablesItems: NO];
+
+        let brightness_names = ["Dim", "Normal", "Bright", "Vivid"];
+        let brightness_selectors = [
+            sel!(setBrightnessDim:),
+            sel!(setBrightnessNormal:),
+            sel!(setBrightnessBright:),
+            sel!(setBrightnessVivid:),
+        ];
+
+        for (i, (name, action)) in brightness_names.iter().zip(brightness_selectors.iter()).enumerate() {
+            let item_title = NSString::alloc(nil).init_str(name);
+            let item: id = msg_send![class!(NSMenuItem), alloc];
+            let item: id = msg_send![item, initWithTitle:item_title action:*action keyEquivalent:NSString::alloc(nil).init_str("")];
+            let _: () = msg_send![item, setTarget: handler];
+            let _: () = msg_send![item, setTag: i as i64];
+            let _: () = msg_send![item, setEnabled: YES];
+            if i as u32 == prefs.brightness {
+                let _: () = msg_send![item, setState: 1i64];
+            }
+            brightness_menu.addItem_(item);
+        }
+
+        let _: () = msg_send![brightness_item, setSubmenu: brightness_menu];
+        menu.addItem_(brightness_item);
+
         // ===== Separator =====
         let separator1: id = msg_send![class!(NSMenuItem), separatorItem];
         menu.addItem_(separator1);
@@ -1435,6 +1529,7 @@ fn setup_menu_bar() {
         let _: () = msg_send![line_length_menu, retain];
         let _: () = msg_send![line_width_menu, retain];
         let _: () = msg_send![view_scale_menu, retain];
+        let _: () = msg_send![brightness_menu, retain];
 
         // Store in static to prevent deallocation
         static mut STATUS_ITEM: *mut Object = std::ptr::null_mut();
@@ -1471,6 +1566,7 @@ fn setup_menu_bar() {
         CURRENT_LINE_LENGTH.store(prefs.line_length, Ordering::SeqCst);
         CURRENT_LINE_WIDTH.store(prefs.line_width, Ordering::SeqCst);
         CURRENT_VIEW_SCALE.store(prefs.view_scale, Ordering::SeqCst);
+        CURRENT_BRIGHTNESS.store(prefs.brightness, Ordering::SeqCst);
 
         // Create menu
         let menu = Menu::new();
@@ -1541,6 +1637,18 @@ fn setup_menu_bar() {
         let _ = scale_submenu.append(&scale_wide);
         let _ = menu.append(&scale_submenu);
 
+        // Brightness submenu
+        let brightness_submenu = Submenu::new("Brightness", true);
+        let brightness_dim = CheckMenuItem::new("Dim", true, prefs.brightness == 0, None);
+        let brightness_normal = CheckMenuItem::new("Normal", true, prefs.brightness == 1, None);
+        let brightness_bright = CheckMenuItem::new("Bright", true, prefs.brightness == 2, None);
+        let brightness_vivid = CheckMenuItem::new("Vivid", true, prefs.brightness == 3, None);
+        let _ = brightness_submenu.append(&brightness_dim);
+        let _ = brightness_submenu.append(&brightness_normal);
+        let _ = brightness_submenu.append(&brightness_bright);
+        let _ = brightness_submenu.append(&brightness_vivid);
+        let _ = menu.append(&brightness_submenu);
+
         let _ = menu.append(&PredefinedMenuItem::separator());
 
         // Quit item
@@ -1554,6 +1662,7 @@ fn setup_menu_bar() {
         let length_ids = [length_short.id().clone(), length_medium.id().clone(), length_long.id().clone(), length_extra.id().clone()];
         let width_ids = [width_thin.id().clone(), width_medium.id().clone(), width_thick.id().clone()];
         let scale_ids = [scale_compact.id().clone(), scale_normal.id().clone(), scale_wide.id().clone()];
+        let brightness_ids = [brightness_dim.id().clone(), brightness_normal.id().clone(), brightness_bright.id().clone(), brightness_vivid.id().clone()];
         let quit_id = quit_item.id().clone();
 
         // Create a simple icon (white square)
@@ -1667,6 +1776,22 @@ fn setup_menu_bar() {
                         scale_normal.set_checked(i == 1);
                         scale_wide.set_checked(i == 2);
                         log::info!("View scale changed to {}", i);
+                    }
+                }
+
+                // Check brightness
+                for (i, brightness_id) in brightness_ids.iter().enumerate() {
+                    if &id == brightness_id {
+                        CURRENT_BRIGHTNESS.store(i as u32, Ordering::SeqCst);
+                        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+                        let mut prefs = load_preferences();
+                        prefs.brightness = i as u32;
+                        save_preferences(&prefs);
+                        brightness_dim.set_checked(i == 0);
+                        brightness_normal.set_checked(i == 1);
+                        brightness_bright.set_checked(i == 2);
+                        brightness_vivid.set_checked(i == 3);
+                        log::info!("Brightness changed to {}", i);
                     }
                 }
 
@@ -1807,16 +1932,18 @@ async fn run_wallpaper_multi(
     settings.line_length = line_length_to_value(prefs.line_length);
     settings.line_width = line_width_to_value(prefs.line_width);
     settings.view_scale = view_scale_to_value(prefs.view_scale);
+    settings.brightness_multiplier = brightness_to_multiplier(prefs.brightness);
     let settings = Arc::new(settings);
 
     log::info!(
-        "Applied settings from preferences: color={}, density={}, noise={}, line_length={}, line_width={}, view_scale={}",
+        "Applied settings from preferences: color={}, density={}, noise={}, line_length={}, line_width={}, view_scale={}, brightness={}",
         prefs.color_scheme,
         prefs.density,
         prefs.noise_strength,
         prefs.line_length,
         prefs.line_width,
-        prefs.view_scale
+        prefs.view_scale,
+        prefs.brightness
     );
 
     // Initialize each display
@@ -1988,8 +2115,9 @@ async fn run_wallpaper_multi(
             let new_line_length = CURRENT_LINE_LENGTH.load(Ordering::SeqCst);
             let new_line_width = CURRENT_LINE_WIDTH.load(Ordering::SeqCst);
             let new_view_scale = CURRENT_VIEW_SCALE.load(Ordering::SeqCst);
-            log::info!("Applying live settings update: color={}, density={}, noise={}, line_length={}, line_width={}, view_scale={}",
-                new_color, new_density, new_noise, new_line_length, new_line_width, new_view_scale);
+            let new_brightness = CURRENT_BRIGHTNESS.load(Ordering::SeqCst);
+            log::info!("Applying live settings update: color={}, density={}, noise={}, line_length={}, line_width={}, view_scale={}, brightness={}",
+                new_color, new_density, new_noise, new_line_length, new_line_width, new_view_scale, new_brightness);
 
             let mut new_settings = Settings::default();
             new_settings.color_mode = scheme_to_color_mode(new_color);
@@ -1998,6 +2126,7 @@ async fn run_wallpaper_multi(
             new_settings.line_length = line_length_to_value(new_line_length);
             new_settings.line_width = line_width_to_value(new_line_width);
             new_settings.view_scale = view_scale_to_value(new_view_scale);
+            new_settings.brightness_multiplier = brightness_to_multiplier(new_brightness);
             let new_settings = Arc::new(new_settings);
 
             for renderer in &mut renderers {

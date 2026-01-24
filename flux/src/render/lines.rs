@@ -46,8 +46,9 @@ impl LineUniforms {
         let base_line_count = 12000.0_f32;
         let line_ratio = base_line_count / grid.line_count as f32;
         // Use linear ratio (not sqrt) for more aggressive darkening on high-line-count displays
-        let brightness_scale = line_ratio.min(1.0);
-        log::info!("Display brightness_scale: {} (line_count: {})", brightness_scale, grid.line_count);
+        // Apply user brightness multiplier
+        let brightness_scale = line_ratio.min(1.0) * settings.brightness_multiplier;
+        log::info!("Display brightness_scale: {} (line_count: {}, user_multiplier: {})", brightness_scale, grid.line_count, settings.brightness_multiplier);
 
         Self {
             aspect: grid.aspect_ratio,

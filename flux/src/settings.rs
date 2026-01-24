@@ -26,6 +26,10 @@ pub struct Settings {
 
     pub noise_multiplier: f32,
     pub noise_channels: Vec<Noise>,
+
+    /// User brightness multiplier (default: 1.0)
+    /// Values < 1.0 dim, values > 1.0 brighten
+    pub brightness_multiplier: f32,
 }
 
 impl Default for Settings {
@@ -66,6 +70,7 @@ impl Default for Settings {
                     offset_increment: 0.001 * 12.0,
                 },
             ],
+            brightness_multiplier: 1.0,
         }
     }
 }

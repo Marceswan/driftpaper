@@ -21,6 +21,7 @@ DriftPaper runs as a menu bar app, rendering a beautiful fluid simulation as you
 | **Line Length** | Short, Medium, Long, Extra Long |
 | **Line Width** | Thin, Medium, Thick |
 | **View Scale** | Compact, Normal, Wide |
+| **Brightness** | Dim, Normal, Bright, Vivid |
 
 Additional options:
 - **Launch at Login** - Automatically start DriftPaper when you log in
