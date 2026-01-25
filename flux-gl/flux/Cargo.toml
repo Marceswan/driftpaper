@@ -1,0 +1,32 @@
+[package]
+name = "flux-gl"
+version = "4.6.0"
+description = "An open-source tribute to the macOS Drift screensaver"
+authors = ["Sander Melnikov <hey@sandydoo.me"]
+repository = "https://github.com/sandydoo/flux/"
+license.workspace = true
+publish = false
+edition = "2021"
+
+build = "build.rs"
+
+[dependencies]
+bytemuck.workspace = true
+crevice = { version  = "0.18", features = [ "std", "nalgebra" ] }
+getrandom.workspace = true
+glow.workspace = true
+half = { version = "2", features = ["bytemuck"] }
+log.workspace = true
+nalgebra = { version = "0.33", features = [ "mint" ] }
+mint = "0.5"
+rand.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+image.workspace = true
+rand_seeder.workspace = true
+rand_pcg.workspace = true
+
+[target.wasm32-unknown-unknown.dependencies.web-sys]
+workspace = true
+features = ["ImageBitmap"]

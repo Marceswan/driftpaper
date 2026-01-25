@@ -1,0 +1,12 @@
+# Javascript
+/node_modules
+.pnpm-debug.log
+
+# Elm
+/elm-stuff
+
+# Rust - commented out to track pre-built WASM for Vercel
+# /flux
+
+# Release
+/dist
