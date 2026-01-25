@@ -31,6 +31,11 @@ pub struct Flux {
 }
 
 impl Flux {
+    /// Get the current grid spacing (used to detect density changes)
+    pub fn grid_spacing(&self) -> u32 {
+        self.settings.grid_spacing
+    }
+
     pub fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, settings: &Arc<Settings>) {
         self.settings = Arc::clone(settings);
         self.fluid

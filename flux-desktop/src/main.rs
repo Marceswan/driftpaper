@@ -41,6 +41,7 @@ static SCREEN_CONFIG_CHANGED: AtomicBool = AtomicBool::new(false);
 
 /// Persistent user preferences
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 struct UserPreferences {
     color_scheme: u32,
     density: u32,
@@ -50,6 +51,8 @@ struct UserPreferences {
     view_scale: u32,
     brightness: u32,
     fps: u32,
+    #[serde(default)]
+    run_on_login: bool,
 }
 
 impl Default for UserPreferences {
@@ -63,6 +66,7 @@ impl Default for UserPreferences {
             view_scale: 1,     // Normal
             brightness: 1,     // Normal
             fps: 30,
+            run_on_login: false,
         }
     }
 }
@@ -141,11 +145,11 @@ fn noise_strength_to_multiplier(strength: u32) -> f32 {
 /// Convert line length setting to line_length value
 fn line_length_to_value(length: u32) -> f32 {
     match length {
-        0 => 200.0,   // Short
-        1 => 450.0,   // Medium (default)
-        2 => 700.0,   // Long
-        3 => 1000.0,  // Extra Long
-        _ => 450.0,
+        0 => 140.0,   // Short (was 200)
+        1 => 315.0,   // Medium (was 450)
+        2 => 490.0,   // Long (was 700)
+        3 => 700.0,   // Extra Long (was 1000)
+        _ => 315.0,
     }
 }
 
@@ -1594,255 +1598,317 @@ fn setup_menu_bar() {
     }
 }
 
+// ==================== Windows Startup Registry ====================
+
+#[cfg(target_os = "windows")]
+fn is_run_on_login_enabled() -> bool {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    if let Ok(key) = hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run") {
+        key.get_value::<String, _>("DriftPaper").is_ok()
+    } else {
+        false
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn set_run_on_login(enable: bool) {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    if let Ok(key) = hkcu.open_subkey_with_flags("Software\\Microsoft\\Windows\\CurrentVersion\\Run", KEY_SET_VALUE | KEY_QUERY_VALUE) {
+        if enable {
+            // Get the current executable path
+            if let Ok(exe_path) = std::env::current_exe() {
+                let path_str = exe_path.to_string_lossy().to_string();
+                if let Err(e) = key.set_value("DriftPaper", &path_str) {
+                    log::error!("Failed to set run on login: {}", e);
+                } else {
+                    log::info!("Run on login enabled: {}", path_str);
+                }
+            }
+        } else {
+            if let Err(e) = key.delete_value("DriftPaper") {
+                log::warn!("Failed to remove run on login (may not exist): {}", e);
+            } else {
+                log::info!("Run on login disabled");
+            }
+        }
+    } else {
+        log::error!("Failed to open registry key for run on login");
+    }
+}
+
 // ==================== Windows System Tray ====================
 
 #[cfg(target_os = "windows")]
-fn setup_menu_bar() {
+fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
     use tray_icon::{TrayIconBuilder, Icon};
-    use muda::{Menu, MenuItem, Submenu, PredefinedMenuItem, MenuEvent, CheckMenuItem};
-    use std::thread;
+    use muda::{Menu, MenuItem, Submenu, PredefinedMenuItem, CheckMenuItem};
 
-    thread::spawn(|| {
-        let prefs = load_preferences();
+    let prefs = load_preferences();
 
-        // Load preferences into atomics
-        CURRENT_COLOR_SCHEME.store(prefs.color_scheme, Ordering::SeqCst);
-        CURRENT_DENSITY.store(prefs.density, Ordering::SeqCst);
-        CURRENT_NOISE_STRENGTH.store(prefs.noise_strength, Ordering::SeqCst);
-        CURRENT_LINE_LENGTH.store(prefs.line_length, Ordering::SeqCst);
-        CURRENT_LINE_WIDTH.store(prefs.line_width, Ordering::SeqCst);
-        CURRENT_VIEW_SCALE.store(prefs.view_scale, Ordering::SeqCst);
-        CURRENT_BRIGHTNESS.store(prefs.brightness, Ordering::SeqCst);
+    // Load preferences into atomics
+    CURRENT_COLOR_SCHEME.store(prefs.color_scheme, Ordering::SeqCst);
+    CURRENT_DENSITY.store(prefs.density, Ordering::SeqCst);
+    CURRENT_NOISE_STRENGTH.store(prefs.noise_strength, Ordering::SeqCst);
+    CURRENT_LINE_LENGTH.store(prefs.line_length, Ordering::SeqCst);
+    CURRENT_LINE_WIDTH.store(prefs.line_width, Ordering::SeqCst);
+    CURRENT_VIEW_SCALE.store(prefs.view_scale, Ordering::SeqCst);
+    CURRENT_BRIGHTNESS.store(prefs.brightness, Ordering::SeqCst);
 
-        // Create menu
-        let menu = Menu::new();
+    // Create menu
+    let menu = Menu::new();
 
-        // Color Scheme submenu
-        let color_submenu = Submenu::new("Color Scheme", true);
-        let color_original = CheckMenuItem::new("Original", true, prefs.color_scheme == 0, None);
-        let color_plasma = CheckMenuItem::new("Plasma", true, prefs.color_scheme == 1, None);
-        let color_poolside = CheckMenuItem::new("Poolside", true, prefs.color_scheme == 2, None);
-        let color_spacegrey = CheckMenuItem::new("Space Grey", true, prefs.color_scheme == 3, None);
-        let _ = color_submenu.append(&color_original);
-        let _ = color_submenu.append(&color_plasma);
-        let _ = color_submenu.append(&color_poolside);
-        let _ = color_submenu.append(&color_spacegrey);
-        let _ = menu.append(&color_submenu);
+    // Color Scheme submenu
+    let color_submenu = Submenu::new("Color Scheme", true);
+    let color_original = CheckMenuItem::new("Original", true, prefs.color_scheme == 0, None);
+    let color_plasma = CheckMenuItem::new("Plasma", true, prefs.color_scheme == 1, None);
+    let color_poolside = CheckMenuItem::new("Poolside", true, prefs.color_scheme == 2, None);
+    let color_spacegrey = CheckMenuItem::new("Space Grey", true, prefs.color_scheme == 3, None);
+    let _ = color_submenu.append(&color_original);
+    let _ = color_submenu.append(&color_plasma);
+    let _ = color_submenu.append(&color_poolside);
+    let _ = color_submenu.append(&color_spacegrey);
+    let _ = menu.append(&color_submenu);
 
-        // Density submenu
-        let density_submenu = Submenu::new("Density", true);
-        let density_sparse = CheckMenuItem::new("Sparse", true, prefs.density == 0, None);
-        let density_normal = CheckMenuItem::new("Normal", true, prefs.density == 1, None);
-        let density_dense = CheckMenuItem::new("Dense", true, prefs.density == 2, None);
-        let _ = density_submenu.append(&density_sparse);
-        let _ = density_submenu.append(&density_normal);
-        let _ = density_submenu.append(&density_dense);
-        let _ = menu.append(&density_submenu);
+    // Density submenu
+    let density_submenu = Submenu::new("Density", true);
+    let density_sparse = CheckMenuItem::new("Sparse", true, prefs.density == 0, None);
+    let density_normal = CheckMenuItem::new("Normal", true, prefs.density == 1, None);
+    let density_dense = CheckMenuItem::new("Dense", true, prefs.density == 2, None);
+    let _ = density_submenu.append(&density_sparse);
+    let _ = density_submenu.append(&density_normal);
+    let _ = density_submenu.append(&density_dense);
+    let _ = menu.append(&density_submenu);
 
-        // Noise Strength submenu
-        let noise_submenu = Submenu::new("Noise Strength", true);
-        let noise_low = CheckMenuItem::new("Low", true, prefs.noise_strength == 0, None);
-        let noise_medium = CheckMenuItem::new("Medium", true, prefs.noise_strength == 1, None);
-        let noise_high = CheckMenuItem::new("High", true, prefs.noise_strength == 2, None);
-        let noise_max = CheckMenuItem::new("Max", true, prefs.noise_strength == 3, None);
-        let _ = noise_submenu.append(&noise_low);
-        let _ = noise_submenu.append(&noise_medium);
-        let _ = noise_submenu.append(&noise_high);
-        let _ = noise_submenu.append(&noise_max);
-        let _ = menu.append(&noise_submenu);
+    // Noise Strength submenu
+    let noise_submenu = Submenu::new("Noise Strength", true);
+    let noise_low = CheckMenuItem::new("Low", true, prefs.noise_strength == 0, None);
+    let noise_medium = CheckMenuItem::new("Medium", true, prefs.noise_strength == 1, None);
+    let noise_high = CheckMenuItem::new("High", true, prefs.noise_strength == 2, None);
+    let noise_max = CheckMenuItem::new("Max", true, prefs.noise_strength == 3, None);
+    let _ = noise_submenu.append(&noise_low);
+    let _ = noise_submenu.append(&noise_medium);
+    let _ = noise_submenu.append(&noise_high);
+    let _ = noise_submenu.append(&noise_max);
+    let _ = menu.append(&noise_submenu);
 
-        // Line Length submenu
-        let length_submenu = Submenu::new("Line Length", true);
-        let length_short = CheckMenuItem::new("Short", true, prefs.line_length == 0, None);
-        let length_medium = CheckMenuItem::new("Medium", true, prefs.line_length == 1, None);
-        let length_long = CheckMenuItem::new("Long", true, prefs.line_length == 2, None);
-        let length_extra = CheckMenuItem::new("Extra Long", true, prefs.line_length == 3, None);
-        let _ = length_submenu.append(&length_short);
-        let _ = length_submenu.append(&length_medium);
-        let _ = length_submenu.append(&length_long);
-        let _ = length_submenu.append(&length_extra);
-        let _ = menu.append(&length_submenu);
+    // Line Length submenu
+    let length_submenu = Submenu::new("Line Length", true);
+    let length_short = CheckMenuItem::new("Short", true, prefs.line_length == 0, None);
+    let length_medium = CheckMenuItem::new("Medium", true, prefs.line_length == 1, None);
+    let length_long = CheckMenuItem::new("Long", true, prefs.line_length == 2, None);
+    let length_extra = CheckMenuItem::new("Extra Long", true, prefs.line_length == 3, None);
+    let _ = length_submenu.append(&length_short);
+    let _ = length_submenu.append(&length_medium);
+    let _ = length_submenu.append(&length_long);
+    let _ = length_submenu.append(&length_extra);
+    let _ = menu.append(&length_submenu);
 
-        // Line Width submenu
-        let width_submenu = Submenu::new("Line Width", true);
-        let width_thin = CheckMenuItem::new("Thin", true, prefs.line_width == 0, None);
-        let width_medium = CheckMenuItem::new("Medium", true, prefs.line_width == 1, None);
-        let width_thick = CheckMenuItem::new("Thick", true, prefs.line_width == 2, None);
-        let _ = width_submenu.append(&width_thin);
-        let _ = width_submenu.append(&width_medium);
-        let _ = width_submenu.append(&width_thick);
-        let _ = menu.append(&width_submenu);
+    // Line Width submenu
+    let width_submenu = Submenu::new("Line Width", true);
+    let width_thin = CheckMenuItem::new("Thin", true, prefs.line_width == 0, None);
+    let width_medium = CheckMenuItem::new("Medium", true, prefs.line_width == 1, None);
+    let width_thick = CheckMenuItem::new("Thick", true, prefs.line_width == 2, None);
+    let _ = width_submenu.append(&width_thin);
+    let _ = width_submenu.append(&width_medium);
+    let _ = width_submenu.append(&width_thick);
+    let _ = menu.append(&width_submenu);
 
-        // View Scale submenu
-        let scale_submenu = Submenu::new("View Scale", true);
-        let scale_compact = CheckMenuItem::new("Compact", true, prefs.view_scale == 0, None);
-        let scale_normal = CheckMenuItem::new("Normal", true, prefs.view_scale == 1, None);
-        let scale_wide = CheckMenuItem::new("Wide", true, prefs.view_scale == 2, None);
-        let _ = scale_submenu.append(&scale_compact);
-        let _ = scale_submenu.append(&scale_normal);
-        let _ = scale_submenu.append(&scale_wide);
-        let _ = menu.append(&scale_submenu);
+    // View Scale submenu
+    let scale_submenu = Submenu::new("View Scale", true);
+    let scale_compact = CheckMenuItem::new("Compact", true, prefs.view_scale == 0, None);
+    let scale_normal = CheckMenuItem::new("Normal", true, prefs.view_scale == 1, None);
+    let scale_wide = CheckMenuItem::new("Wide", true, prefs.view_scale == 2, None);
+    let _ = scale_submenu.append(&scale_compact);
+    let _ = scale_submenu.append(&scale_normal);
+    let _ = scale_submenu.append(&scale_wide);
+    let _ = menu.append(&scale_submenu);
 
-        // Brightness submenu
-        let brightness_submenu = Submenu::new("Brightness", true);
-        let brightness_dim = CheckMenuItem::new("Dim", true, prefs.brightness == 0, None);
-        let brightness_normal = CheckMenuItem::new("Normal", true, prefs.brightness == 1, None);
-        let brightness_bright = CheckMenuItem::new("Bright", true, prefs.brightness == 2, None);
-        let brightness_vivid = CheckMenuItem::new("Vivid", true, prefs.brightness == 3, None);
-        let _ = brightness_submenu.append(&brightness_dim);
-        let _ = brightness_submenu.append(&brightness_normal);
-        let _ = brightness_submenu.append(&brightness_bright);
-        let _ = brightness_submenu.append(&brightness_vivid);
-        let _ = menu.append(&brightness_submenu);
+    // Brightness submenu
+    let brightness_submenu = Submenu::new("Brightness", true);
+    let brightness_dim = CheckMenuItem::new("Dim", true, prefs.brightness == 0, None);
+    let brightness_normal = CheckMenuItem::new("Normal", true, prefs.brightness == 1, None);
+    let brightness_bright = CheckMenuItem::new("Bright", true, prefs.brightness == 2, None);
+    let brightness_vivid = CheckMenuItem::new("Vivid", true, prefs.brightness == 3, None);
+    let _ = brightness_submenu.append(&brightness_dim);
+    let _ = brightness_submenu.append(&brightness_normal);
+    let _ = brightness_submenu.append(&brightness_bright);
+    let _ = brightness_submenu.append(&brightness_vivid);
+    let _ = menu.append(&brightness_submenu);
 
-        let _ = menu.append(&PredefinedMenuItem::separator());
+    let _ = menu.append(&PredefinedMenuItem::separator());
 
-        // Quit item
-        let quit_item = MenuItem::new("Quit DriftPaper", true, None);
-        let _ = menu.append(&quit_item);
+    // Run on Login item
+    let run_on_login_enabled = is_run_on_login_enabled();
+    let run_on_login_item = CheckMenuItem::new("Run on Login", true, run_on_login_enabled, None);
+    let _ = menu.append(&run_on_login_item);
 
-        // Store menu item IDs for event handling
-        let color_ids = [color_original.id().clone(), color_plasma.id().clone(), color_poolside.id().clone(), color_spacegrey.id().clone()];
-        let density_ids = [density_sparse.id().clone(), density_normal.id().clone(), density_dense.id().clone()];
-        let noise_ids = [noise_low.id().clone(), noise_medium.id().clone(), noise_high.id().clone(), noise_max.id().clone()];
-        let length_ids = [length_short.id().clone(), length_medium.id().clone(), length_long.id().clone(), length_extra.id().clone()];
-        let width_ids = [width_thin.id().clone(), width_medium.id().clone(), width_thick.id().clone()];
-        let scale_ids = [scale_compact.id().clone(), scale_normal.id().clone(), scale_wide.id().clone()];
-        let brightness_ids = [brightness_dim.id().clone(), brightness_normal.id().clone(), brightness_bright.id().clone(), brightness_vivid.id().clone()];
-        let quit_id = quit_item.id().clone();
+    let _ = menu.append(&PredefinedMenuItem::separator());
 
-        // Create a simple icon (white square)
-        let icon_data = vec![255u8; 32 * 32 * 4]; // 32x32 white RGBA
-        let icon = Icon::from_rgba(icon_data, 32, 32).expect("Failed to create icon");
+    // Quit item
+    let quit_item = MenuItem::new("Quit DriftPaper", true, None);
+    let quit_id = quit_item.id().clone();
+    let _ = menu.append(&quit_item);
 
-        // Build tray icon
-        let _tray_icon = TrayIconBuilder::new()
-            .with_menu(Box::new(menu))
-            .with_tooltip("DriftPaper")
-            .with_icon(icon)
-            .build()
-            .expect("Failed to create tray icon");
+    // Try to load the app icon from embedded bytes, fall back to simple icon
+    let icon = {
+        // Embed the 32x32 PNG icon at compile time
+        let icon_bytes = include_bytes!("../Assets.xcassets/AppIcon.appiconset/32.png");
+        match image::load_from_memory(icon_bytes) {
+            Ok(img) => {
+                let rgba = img.to_rgba8();
+                let (width, height) = rgba.dimensions();
+                Icon::from_rgba(rgba.into_raw(), width, height).unwrap_or_else(|_| {
+                    let icon_data = vec![255u8; 32 * 32 * 4];
+                    Icon::from_rgba(icon_data, 32, 32).expect("Failed to create fallback icon")
+                })
+            }
+            Err(_) => {
+                let icon_data = vec![255u8; 32 * 32 * 4];
+                Icon::from_rgba(icon_data, 32, 32).expect("Failed to create fallback icon")
+            }
+        }
+    };
 
-        log::info!("Windows system tray created");
+    // Build tray icon - must be kept alive for the duration of the program
+    let tray_icon = TrayIconBuilder::new()
+        .with_menu(Box::new(menu))
+        .with_tooltip("DriftPaper - Right-click for settings")
+        .with_icon(icon)
+        .build()
+        .expect("Failed to create tray icon");
 
-        // Event loop for menu events
+    log::info!("Windows system tray created");
+
+    // Extract string IDs before spawning thread (MenuId contains Rc which is not Send)
+    let color_ids: Vec<String> = [&color_original, &color_plasma, &color_poolside, &color_spacegrey]
+        .iter().map(|item| item.id().0.clone()).collect();
+    let density_ids: Vec<String> = [&density_sparse, &density_normal, &density_dense]
+        .iter().map(|item| item.id().0.clone()).collect();
+    let noise_ids: Vec<String> = [&noise_low, &noise_medium, &noise_high, &noise_max]
+        .iter().map(|item| item.id().0.clone()).collect();
+    let length_ids: Vec<String> = [&length_short, &length_medium, &length_long, &length_extra]
+        .iter().map(|item| item.id().0.clone()).collect();
+    let width_ids: Vec<String> = [&width_thin, &width_medium, &width_thick]
+        .iter().map(|item| item.id().0.clone()).collect();
+    let scale_ids: Vec<String> = [&scale_compact, &scale_normal, &scale_wide]
+        .iter().map(|item| item.id().0.clone()).collect();
+    let brightness_ids: Vec<String> = [&brightness_dim, &brightness_normal, &brightness_bright, &brightness_vivid]
+        .iter().map(|item| item.id().0.clone()).collect();
+    let run_on_login_id_str = run_on_login_item.id().0.clone();
+    let quit_id_str = quit_id.0.clone();
+
+    // Spawn thread to handle menu events
+    std::thread::spawn(move || {
+        use muda::MenuEvent;
         let menu_channel = MenuEvent::receiver();
+
         loop {
             if let Ok(event) = menu_channel.recv() {
-                let id = event.id;
+                let id_str = &event.id.0;
 
                 // Check color scheme
                 for (i, color_id) in color_ids.iter().enumerate() {
-                    if &id == color_id {
+                    if id_str == color_id {
                         CURRENT_COLOR_SCHEME.store(i as u32, Ordering::SeqCst);
                         SETTINGS_CHANGED.store(true, Ordering::SeqCst);
                         let mut prefs = load_preferences();
                         prefs.color_scheme = i as u32;
                         save_preferences(&prefs);
-                        // Update checkmarks
-                        color_original.set_checked(i == 0);
-                        color_plasma.set_checked(i == 1);
-                        color_poolside.set_checked(i == 2);
-                        color_spacegrey.set_checked(i == 3);
                         log::info!("Color scheme changed to {}", i);
                     }
                 }
 
                 // Check density
                 for (i, density_id) in density_ids.iter().enumerate() {
-                    if &id == density_id {
+                    if id_str == density_id {
                         CURRENT_DENSITY.store(i as u32, Ordering::SeqCst);
                         SETTINGS_CHANGED.store(true, Ordering::SeqCst);
                         let mut prefs = load_preferences();
                         prefs.density = i as u32;
                         save_preferences(&prefs);
-                        density_sparse.set_checked(i == 0);
-                        density_normal.set_checked(i == 1);
-                        density_dense.set_checked(i == 2);
                         log::info!("Density changed to {}", i);
                     }
                 }
 
                 // Check noise
                 for (i, noise_id) in noise_ids.iter().enumerate() {
-                    if &id == noise_id {
+                    if id_str == noise_id {
                         CURRENT_NOISE_STRENGTH.store(i as u32, Ordering::SeqCst);
                         SETTINGS_CHANGED.store(true, Ordering::SeqCst);
                         let mut prefs = load_preferences();
                         prefs.noise_strength = i as u32;
                         save_preferences(&prefs);
-                        noise_low.set_checked(i == 0);
-                        noise_medium.set_checked(i == 1);
-                        noise_high.set_checked(i == 2);
-                        noise_max.set_checked(i == 3);
                         log::info!("Noise strength changed to {}", i);
                     }
                 }
 
                 // Check line length
                 for (i, length_id) in length_ids.iter().enumerate() {
-                    if &id == length_id {
+                    if id_str == length_id {
                         CURRENT_LINE_LENGTH.store(i as u32, Ordering::SeqCst);
                         SETTINGS_CHANGED.store(true, Ordering::SeqCst);
                         let mut prefs = load_preferences();
                         prefs.line_length = i as u32;
                         save_preferences(&prefs);
-                        length_short.set_checked(i == 0);
-                        length_medium.set_checked(i == 1);
-                        length_long.set_checked(i == 2);
-                        length_extra.set_checked(i == 3);
                         log::info!("Line length changed to {}", i);
                     }
                 }
 
                 // Check line width
                 for (i, width_id) in width_ids.iter().enumerate() {
-                    if &id == width_id {
+                    if id_str == width_id {
                         CURRENT_LINE_WIDTH.store(i as u32, Ordering::SeqCst);
                         SETTINGS_CHANGED.store(true, Ordering::SeqCst);
                         let mut prefs = load_preferences();
                         prefs.line_width = i as u32;
                         save_preferences(&prefs);
-                        width_thin.set_checked(i == 0);
-                        width_medium.set_checked(i == 1);
-                        width_thick.set_checked(i == 2);
                         log::info!("Line width changed to {}", i);
                     }
                 }
 
                 // Check view scale
                 for (i, scale_id) in scale_ids.iter().enumerate() {
-                    if &id == scale_id {
+                    if id_str == scale_id {
                         CURRENT_VIEW_SCALE.store(i as u32, Ordering::SeqCst);
                         SETTINGS_CHANGED.store(true, Ordering::SeqCst);
                         let mut prefs = load_preferences();
                         prefs.view_scale = i as u32;
                         save_preferences(&prefs);
-                        scale_compact.set_checked(i == 0);
-                        scale_normal.set_checked(i == 1);
-                        scale_wide.set_checked(i == 2);
                         log::info!("View scale changed to {}", i);
                     }
                 }
 
                 // Check brightness
                 for (i, brightness_id) in brightness_ids.iter().enumerate() {
-                    if &id == brightness_id {
+                    if id_str == brightness_id {
                         CURRENT_BRIGHTNESS.store(i as u32, Ordering::SeqCst);
                         SETTINGS_CHANGED.store(true, Ordering::SeqCst);
                         let mut prefs = load_preferences();
                         prefs.brightness = i as u32;
                         save_preferences(&prefs);
-                        brightness_dim.set_checked(i == 0);
-                        brightness_normal.set_checked(i == 1);
-                        brightness_bright.set_checked(i == 2);
-                        brightness_vivid.set_checked(i == 3);
                         log::info!("Brightness changed to {}", i);
                     }
                 }
 
+                // Check run on login toggle
+                if id_str == &run_on_login_id_str {
+                    // Toggle the current state
+                    let currently_enabled = is_run_on_login_enabled();
+                    set_run_on_login(!currently_enabled);
+                    let mut prefs = load_preferences();
+                    prefs.run_on_login = !currently_enabled;
+                    save_preferences(&prefs);
+                    log::info!("Run on login toggled to {}", !currently_enabled);
+                }
+
                 // Check quit
-                if id == quit_id {
+                if id_str == &quit_id_str {
                     log::info!("Quit requested from tray");
                     SHOULD_QUIT.store(true, Ordering::SeqCst);
                     break;
@@ -1850,6 +1916,8 @@ fn setup_menu_bar() {
             }
         }
     });
+
+    Some(tray_icon)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -1873,6 +1941,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Wallpaper mode is the default; use --windowed for normal window
     if !args.windowed {
         // Setup menu bar for wallpaper control (must be on main thread before event loop)
+        // On Windows, we need to keep the tray icon alive by storing the returned value
+        #[cfg(target_os = "windows")]
+        let _tray_icon = setup_menu_bar();
+        #[cfg(not(target_os = "windows"))]
         setup_menu_bar();
 
         // Setup screen configuration change monitoring
@@ -2176,22 +2248,28 @@ async fn run_wallpaper_multi(
             let new_settings = Arc::new(new_settings);
 
             for renderer in &mut renderers {
-                // Update settings first
+                // Check if density changed BEFORE updating (update overwrites settings)
+                let density_changed = renderer.flux.grid_spacing() != new_settings.grid_spacing;
+
+                // Update settings - this handles color, noise, line dimensions, brightness
                 renderer.flux.update(&renderer.device, &renderer.queue, &new_settings);
 
-                // Then resize to apply new grid_spacing (density)
-                // This recreates the grid with the new spacing
-                let physical_size = renderer.window.inner_size();
-                let logical_width = renderer.display_info.width as u32;
-                let logical_height = renderer.display_info.height as u32;
-                renderer.flux.resize(
-                    &renderer.device,
-                    &renderer.queue,
-                    logical_width,
-                    logical_height,
-                    physical_size.width,
-                    physical_size.height,
-                );
+                // Only resize if density changed (grid_spacing affects line count)
+                // Resize recreates buffers which is expensive, so only do it when necessary
+                if density_changed {
+                    log::info!("Density changed, resizing renderer");
+                    let physical_size = renderer.window.inner_size();
+                    let logical_width = renderer.display_info.width as u32;
+                    let logical_height = renderer.display_info.height as u32;
+                    renderer.flux.resize(
+                        &renderer.device,
+                        &renderer.queue,
+                        logical_width,
+                        logical_height,
+                        physical_size.width,
+                        physical_size.height,
+                    );
+                }
             }
         }
 
