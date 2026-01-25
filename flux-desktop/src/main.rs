@@ -533,92 +533,138 @@ fn get_all_displays() -> Vec<DisplayInfo> {
 
 #[cfg(target_os = "windows")]
 mod windows_wallpaper {
-    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE};
+    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE, FALSE};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, FindWindowA, FindWindowExA, GetWindowLongPtrA, SendMessageTimeoutA,
-        SetParent, SetWindowLongPtrA, SetWindowPos, GWL_EXSTYLE, GWL_STYLE,
-        HWND_BOTTOM, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SMTO_NORMAL,
-        WS_CHILD, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+        EnumWindows, FindWindowA, FindWindowExA, GetWindowLongPtrA, GetWindowRect,
+        SendMessageTimeoutA, SetParent, SetWindowLongPtrA, SetWindowPos, ShowWindow,
+        SetLayeredWindowAttributes, GWL_EXSTYLE, GWL_STYLE, LWA_ALPHA,
+        SWP_NOACTIVATE, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE,
+        SMTO_NORMAL, SW_SHOWNA, WS_CHILD, WS_DISABLED, WS_POPUP, WS_EX_LAYERED,
     };
     use std::ptr::null;
 
+    // Store WorkerW if found
     static mut WORKERW: HWND = 0 as HWND;
 
     unsafe extern "system" fn enum_windows_proc(hwnd: HWND, _lparam: LPARAM) -> BOOL {
+        // Check if this window contains SHELLDLL_DefView (the desktop icons container)
         let shell_view = FindWindowExA(hwnd, 0 as HWND, b"SHELLDLL_DefView\0".as_ptr(), null());
         if shell_view != 0 as HWND {
-            WORKERW = FindWindowExA(0 as HWND, hwnd, b"WorkerW\0".as_ptr(), null());
+            log::info!("Found SHELLDLL_DefView inside window {:?}", hwnd);
+
+            // Now find the WorkerW window that's a sibling AFTER this one
+            let worker = FindWindowExA(0 as HWND, hwnd, b"WorkerW\0".as_ptr(), null());
+            if worker != 0 as HWND {
+                WORKERW = worker;
+                log::info!("Found WorkerW {:?} (sibling after SHELLDLL_DefView parent)", worker);
+                return FALSE; // Stop enumeration
+            }
         }
-        TRUE
+        TRUE // Continue enumeration
     }
 
-    pub unsafe fn get_workerw() -> HWND {
+    pub unsafe fn setup_as_wallpaper(hwnd: HWND, _x: i32, _y: i32, width: i32, height: i32) {
         // Find Progman window
         let progman = FindWindowA(b"Progman\0".as_ptr(), null());
         if progman == 0 as HWND {
             log::error!("Failed to find Progman window");
-            return 0 as HWND;
+            return;
         }
+        log::info!("Found Progman window: {:?}", progman);
 
-        // Send message to spawn WorkerW
-        let mut _result: usize = 0;
-        SendMessageTimeoutA(
-            progman,
-            0x052C, // Spawn WorkerW
-            0xD,
-            0,
-            SMTO_NORMAL,
-            1000,
-            &mut _result as *mut usize,
-        );
+        // Send message to spawn/prepare WorkerW
+        let mut result: usize = 0;
+        SendMessageTimeoutA(progman, 0x052C, 0xD, 0x1, SMTO_NORMAL, 1000, &mut result as *mut usize);
+        log::info!("SendMessage 0x052C result: {}", result);
 
-        // Find the WorkerW window
+        // Small delay to let Windows process the message
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Find SHELLDLL_DefView and WorkerW
+        let shell_view = FindWindowExA(progman, 0 as HWND, b"SHELLDLL_DefView\0".as_ptr(), null());
         WORKERW = 0 as HWND;
         EnumWindows(Some(enum_windows_proc), 0);
 
-        if WORKERW == 0 as HWND {
-            log::error!("Failed to find WorkerW window");
+        // Get Progman dimensions
+        let mut progman_rect: windows_sys::Win32::Foundation::RECT = std::mem::zeroed();
+        GetWindowRect(progman, &mut progman_rect);
+        let progman_width = progman_rect.right - progman_rect.left;
+        let progman_height = progman_rect.bottom - progman_rect.top;
+        log::info!("Progman size: {}x{}", progman_width, progman_height);
+
+        if shell_view != 0 as HWND {
+            // Windows 11 style: SHELLDLL_DefView is in Progman
+            // We parent to Progman and position below shell_view
+            log::info!("Using Windows 11 style injection (SHELLDLL_DefView in Progman)");
+            log::info!("shell_view: {:?}, workerw: {:?}", shell_view, WORKERW);
+
+            // Step 1: Modify window style - remove popup/disabled, add child
+            let style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+            let new_style = (style & !(WS_POPUP as isize) & !(WS_DISABLED as isize)) | WS_CHILD as isize;
+            SetWindowLongPtrA(hwnd, GWL_STYLE, new_style);
+            log::info!("Style: {:X} -> {:X}", style, new_style);
+
+            // Step 2: Parent to Progman
+            let old_parent = SetParent(hwnd, progman);
+            log::info!("SetParent to Progman, old parent: {:?}", old_parent);
+
+            // Step 3: Make layered and set alpha
+            let ex_style = GetWindowLongPtrA(hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrA(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED as isize);
+            SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+
+            // Step 4: Position BELOW shell_view (this is the key!)
+            // Using shell_view as hWndInsertAfter places our window directly below it in z-order
+            let pos_result = SetWindowPos(
+                hwnd,
+                shell_view,  // Insert after (below) shell_view
+                0,
+                0,
+                progman_width,
+                progman_height,
+                SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            );
+            log::info!("SetWindowPos below shell_view result: {}", pos_result);
+
+            // Step 5: If we have WorkerW, reorder it above our window
+            if WORKERW != 0 as HWND {
+                SetWindowPos(
+                    WORKERW,
+                    hwnd,  // Insert after (below) our window
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+                log::info!("Reordered WorkerW above our window");
+            }
+
+            // Step 6: Show without activating
+            ShowWindow(hwnd, SW_SHOWNA);
+            log::info!("Window shown as wallpaper");
+
+        } else if WORKERW != 0 as HWND {
+            // Legacy Windows 10 style: Use WorkerW as parent
+            log::info!("Using legacy WorkerW style injection");
+
+            let style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+            let new_style = (style & !(WS_POPUP as isize) & !(WS_DISABLED as isize)) | WS_CHILD as isize;
+            SetWindowLongPtrA(hwnd, GWL_STYLE, new_style);
+
+            SetParent(hwnd, WORKERW);
+
+            let ex_style = GetWindowLongPtrA(hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrA(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED as isize);
+            SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+
+            SetWindowPos(hwnd, 0 as HWND, 0, 0, width, height, SWP_NOACTIVATE | SWP_FRAMECHANGED);
+            ShowWindow(hwnd, SW_SHOWNA);
+            log::info!("Window shown as wallpaper (WorkerW parent)");
+
         } else {
-            log::info!("Found WorkerW window: {:?}", WORKERW);
+            log::error!("Could not find shell_view or WorkerW - wallpaper injection failed");
         }
-
-        WORKERW
-    }
-
-    pub unsafe fn setup_as_wallpaper(hwnd: HWND, x: i32, y: i32, width: i32, height: i32) {
-        let workerw = get_workerw();
-        if workerw == 0 as HWND {
-            log::error!("Cannot set up wallpaper: WorkerW not found");
-            return;
-        }
-
-        // Remove window decorations and make it a child
-        let style = GetWindowLongPtrA(hwnd, GWL_STYLE);
-        SetWindowLongPtrA(hwnd, GWL_STYLE, (style as u32 | WS_CHILD) as isize);
-
-        // Set extended styles for transparency and no activation
-        let ex_style = GetWindowLongPtrA(hwnd, GWL_EXSTYLE);
-        SetWindowLongPtrA(
-            hwnd,
-            GWL_EXSTYLE,
-            (ex_style as u32 | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) as isize,
-        );
-
-        // Parent to WorkerW
-        SetParent(hwnd, workerw);
-
-        // Position the window
-        SetWindowPos(
-            hwnd,
-            HWND_BOTTOM,
-            x,
-            y,
-            width,
-            height,
-            SWP_NOACTIVATE,
-        );
-
-        log::info!("Window set as wallpaper child at {}x{} ({}x{})", x, y, width, height);
     }
 }
 
