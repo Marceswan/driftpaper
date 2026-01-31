@@ -41,7 +41,7 @@ impl Default for Settings {
             diffusion_iterations: 3,
             pressure_iterations: 19,
             color_mode: ColorMode::Preset(ColorPreset::Original),
-            line_length: 550.0,
+            line_length: 248.0,
             line_width: 10.0,
             line_begin_offset: 0.4,
             line_variance: 0.45,

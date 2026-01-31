@@ -145,11 +145,11 @@ fn noise_strength_to_multiplier(strength: u32) -> f32 {
 /// Convert line length setting to line_length value
 fn line_length_to_value(length: u32) -> f32 {
     match length {
-        0 => 140.0,   // Short (was 200)
-        1 => 315.0,   // Medium (was 450)
-        2 => 490.0,   // Long (was 700)
-        3 => 700.0,   // Extra Long (was 1000)
-        _ => 315.0,
+        0 => 63.0,    // Short
+        1 => 142.0,   // Medium
+        2 => 220.0,   // Long
+        3 => 315.0,   // Extra Long
+        _ => 142.0,
     }
 }
 

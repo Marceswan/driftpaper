@@ -1,0 +1,182 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build release
+        run: cargo build --release -p flux-desktop
+
+      - name: Prepare Windows artifact
+        run: |
+          mkdir -p artifact/windows
+          cp target/release/drift.exe artifact/windows/DriftPaper.exe
+        shell: bash
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: artifact/windows/DriftPaper.exe
+
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [x86_64-apple-darwin, aarch64-apple-darwin]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Build release
+        run: cargo build --release -p flux-desktop --target ${{ matrix.target }}
+
+      - name: Prepare macOS app bundle
+        run: |
+          mkdir -p artifact/DriftPaper.app/Contents/MacOS
+          mkdir -p artifact/DriftPaper.app/Contents/Resources
+          cp target/${{ matrix.target }}/release/drift artifact/DriftPaper.app/Contents/MacOS/DriftPaper
+          cp release/DriftPaper.app/Contents/Info.plist artifact/DriftPaper.app/Contents/Info.plist
+          cp release/AppIcon.icns artifact/DriftPaper.app/Contents/Resources/AppIcon.icns
+          chmod +x artifact/DriftPaper.app/Contents/MacOS/DriftPaper
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.target }}-build
+          path: artifact/DriftPaper.app
+
+  create-universal-macos:
+    needs: build-macos
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download x86_64 build
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-x86_64-apple-darwin-build
+          path: x86_64-app
+
+      - name: Download arm64 build
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-aarch64-apple-darwin-build
+          path: arm64-app
+
+      - name: Create universal binary
+        run: |
+          mkdir -p universal/DriftPaper.app/Contents/MacOS
+          mkdir -p universal/DriftPaper.app/Contents/Resources
+
+          # Create universal binary using lipo
+          lipo -create \
+            x86_64-app/Contents/MacOS/DriftPaper \
+            arm64-app/Contents/MacOS/DriftPaper \
+            -output universal/DriftPaper.app/Contents/MacOS/DriftPaper
+
+          # Copy resources from one of the builds
+          cp arm64-app/Contents/Info.plist universal/DriftPaper.app/Contents/Info.plist
+          cp arm64-app/Contents/Resources/AppIcon.icns universal/DriftPaper.app/Contents/Resources/AppIcon.icns
+          chmod +x universal/DriftPaper.app/Contents/MacOS/DriftPaper
+
+      - name: Create macOS DMG
+        run: |
+          hdiutil create -volname "DriftPaper" -srcfolder universal/DriftPaper.app -ov -format UDZO DriftPaper-macOS.dmg
+
+      - name: Upload universal macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal-build
+          path: universal/DriftPaper.app
+
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: DriftPaper-macOS.dmg
+
+  release:
+    needs: [build-windows, create-universal-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-build
+          path: windows
+
+      - name: Download macOS DMG
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-dmg
+          path: macos
+
+      - name: Download macOS app
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-universal-build
+          path: macos-app
+
+      - name: Prepare release assets
+        run: |
+          # Zip Windows executable
+          cd windows && zip -r ../DriftPaper-Windows.zip DriftPaper.exe && cd ..
+
+          # Zip macOS app
+          cd macos-app && zip -r ../DriftPaper-macOS.zip DriftPaper.app && cd ..
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            DriftPaper-Windows.zip
+            DriftPaper-macOS.zip
+            macos/DriftPaper-macOS.dmg
+          generate_release_notes: true
