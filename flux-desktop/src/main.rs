@@ -432,12 +432,12 @@ fn setup_wallpaper_window(window: &Window, display: &DisplayInfo) {
         );
 
         // Try to add the method first
-        let method_added = objc::runtime::class_addMethod(
+        let method_added: bool = objc::runtime::class_addMethod(
             view_class as *mut Class,
             hit_test_sel,
             imp,
             b"@@:{NSPoint=dd}\0".as_ptr() as *const i8,
-        );
+        ) as i8 != 0;
 
         if method_added {
             log::info!("Successfully added custom hitTest: to view class");
