@@ -2094,12 +2094,6 @@ fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
                             prefs.color_scheme = i as u32;
                             save_preferences(&prefs);
                         }
-                        // Update checkmarks for all 5 items
-                        color_original.set_checked(i == 0);
-                        color_plasma.set_checked(i == 1);
-                        color_poolside.set_checked(i == 2);
-                        color_spacegrey.set_checked(i == 3);
-                        color_custom.set_checked(i == 4);
                         log::info!("Color scheme changed to {}", i);
                     }
                 }
