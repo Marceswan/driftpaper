@@ -4,13 +4,45 @@ on:
   push:
     branches:
       - main
-    tags:
-      - "v*"
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Compute next patch version from latest git tag (runs in parallel with builds)
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          # Get latest vX.Y.Z tag (ignore web-v* and other prefixed tags)
+          LATEST_TAG=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -1)
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="v0.0.0"
+          fi
+          echo "Latest tag: $LATEST_TAG"
+
+          VERSION=${LATEST_TAG#v}
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+          NEW_TAG="v${NEW_VERSION}"
+
+          echo "Next version: $NEW_VERSION ($NEW_TAG)"
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+
   build-windows:
     runs-on: windows-latest
     steps:
@@ -138,9 +170,8 @@ jobs:
           path: DriftPaper-macOS.dmg
 
   release:
-    needs: [build-windows, create-universal-macos]
+    needs: [version, build-windows, create-universal-macos]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
@@ -172,9 +203,18 @@ jobs:
           # Zip macOS app
           cd macos-app && zip -r ../DriftPaper-macOS.zip DriftPaper.app && cd ..
 
+      - name: Create tag
+        env:
+          RELEASE_TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          git tag "$RELEASE_TAG"
+          git push origin "$RELEASE_TAG"
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: DriftPaper ${{ needs.version.outputs.tag }}
           files: |
             DriftPaper-Windows.zip
             DriftPaper-macOS.zip
