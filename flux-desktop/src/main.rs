@@ -3,7 +3,8 @@
 
 use clap::Parser;
 use image::RgbaImage;
-use std::sync::{Arc, Mutex};
+use std::path::Path;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tokio::sync::mpsc;
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,13 @@ static SETTINGS_CHANGED: AtomicBool = AtomicBool::new(false);
 // Global flag to signal screen configuration changed (resolution, refresh rate, display added/removed)
 static SCREEN_CONFIG_CHANGED: AtomicBool = AtomicBool::new(false);
 
+// Global storage for custom color wheel extracted from an image
+// Written by menu handler thread, read by render/event loop thread
+fn custom_color_wheel() -> &'static Mutex<Option<[f32; 24]>> {
+    static INSTANCE: OnceLock<Mutex<Option<[f32; 24]>>> = OnceLock::new();
+    INSTANCE.get_or_init(|| Mutex::new(None))
+}
+
 /// Persistent user preferences
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -53,6 +61,10 @@ struct UserPreferences {
     fps: u32,
     #[serde(default)]
     run_on_login: bool,
+    #[serde(default)]
+    custom_color_wheel: Option<[f32; 24]>,
+    #[serde(default)]
+    custom_image_path: Option<String>,
 }
 
 impl Default for UserPreferences {
@@ -67,6 +79,8 @@ impl Default for UserPreferences {
             brightness: 1,     // Normal
             fps: 30,
             run_on_login: false,
+            custom_color_wheel: None,
+            custom_image_path: None,
         }
     }
 }
@@ -112,10 +126,10 @@ fn save_preferences(prefs: &UserPreferences) {
 /// Larger values = fewer lines = less memory usage
 fn density_to_grid_spacing(density: u32) -> u32 {
     match density {
-        0 => 35, // Sparse - fewer stems, lowest memory
-        1 => 22, // Normal - balanced
-        2 => 15, // Dense - more stems
-        _ => 22,
+        0 => 25, // Sparse - fewer stems, lowest memory
+        1 => 15, // Normal - balanced
+        2 => 10, // Dense - more stems
+        _ => 15,
     }
 }
 
@@ -127,8 +141,139 @@ fn scheme_to_color_mode(scheme: u32) -> flux::settings::ColorMode {
         1 => ColorMode::Preset(ColorPreset::Plasma),
         2 => ColorMode::Preset(ColorPreset::Poolside),
         3 => ColorMode::Preset(ColorPreset::SpaceGrey),
+        // 4 = Custom Image - use Original as placeholder; actual custom wheel is injected separately
+        4 => ColorMode::Preset(ColorPreset::Original),
         _ => ColorMode::Preset(ColorPreset::Original),
     }
+}
+
+/// Convert HSL values to RGB floats (0.0-1.0)
+fn hsl_to_rgb_f32(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
+    if s == 0.0 {
+        return (l, l, l);
+    }
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+    let hue_to_rgb = |p: f32, q: f32, mut t: f32| -> f32 {
+        if t < 0.0 { t += 1.0; }
+        if t > 1.0 { t -= 1.0; }
+        if t < 1.0 / 6.0 { return p + (q - p) * 6.0 * t; }
+        if t < 1.0 / 2.0 { return q; }
+        if t < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - t) * 6.0; }
+        p
+    };
+    let r = hue_to_rgb(p, q, h + 1.0 / 3.0);
+    let g = hue_to_rgb(p, q, h);
+    let b = hue_to_rgb(p, q, h - 1.0 / 3.0);
+    (r, g, b)
+}
+
+/// Extract 6 dominant colors from an image and return as [f32; 24] color wheel
+fn extract_colors_from_image(path: &Path) -> Result<[f32; 24], String> {
+    let img = image::open(path).map_err(|e| format!("Failed to open image: {}", e))?;
+
+    // Downscale to max 200x200 for fast processing
+    let thumb = img.thumbnail(200, 200);
+    let rgb = thumb.to_rgb8();
+
+    // Bin pixels into 12 hue buckets (30 degrees each)
+    struct HueBucket {
+        h_sum: f64,
+        s_sum: f64,
+        l_sum: f64,
+        count: u64,
+    }
+    let mut buckets: Vec<HueBucket> = (0..12)
+        .map(|_| HueBucket { h_sum: 0.0, s_sum: 0.0, l_sum: 0.0, count: 0 })
+        .collect();
+
+    for pixel in rgb.pixels() {
+        let r = pixel[0] as f32 / 255.0;
+        let g = pixel[1] as f32 / 255.0;
+        let b = pixel[2] as f32 / 255.0;
+
+        let max = r.max(g).max(b);
+        let min = r.min(g).min(b);
+        let delta = max - min;
+        let l = (max + min) / 2.0;
+
+        // Filter very dark, very light, and near-grey pixels
+        if l < 0.08 || l > 0.92 || delta < 0.02 {
+            continue;
+        }
+
+        let s = if l < 0.5 {
+            delta / (max + min)
+        } else {
+            delta / (2.0 - max - min)
+        };
+
+        let h = if delta == 0.0 {
+            0.0
+        } else if max == r {
+            60.0 * (((g - b) / delta) % 6.0)
+        } else if max == g {
+            60.0 * (((b - r) / delta) + 2.0)
+        } else {
+            60.0 * (((r - g) / delta) + 4.0)
+        };
+        let h = if h < 0.0 { h + 360.0 } else { h };
+
+        let bucket_idx = ((h / 30.0) as usize).min(11);
+        buckets[bucket_idx].h_sum += h as f64;
+        buckets[bucket_idx].s_sum += s as f64;
+        buckets[bucket_idx].l_sum += l as f64;
+        buckets[bucket_idx].count += 1;
+    }
+
+    // Collect non-empty buckets with averages
+    let mut candidates: Vec<(f32, f32, f32, u64)> = buckets.iter()
+        .filter(|b| b.count > 0)
+        .map(|b| {
+            let n = b.count as f64;
+            ((b.h_sum / n) as f32, (b.s_sum / n) as f32, (b.l_sum / n) as f32, b.count)
+        })
+        .collect();
+
+    // Sort by count descending, take top 6
+    candidates.sort_by(|a, b| b.3.cmp(&a.3));
+
+    // Handle monochrome edge case: if fewer than 6 buckets, spread lightness
+    if candidates.len() < 6 {
+        if candidates.is_empty() {
+            // Completely monochrome or featureless - generate a neutral spread
+            candidates = (0..6)
+                .map(|i| (0.0, 0.0, 0.2 + (i as f32) * 0.12))
+                .map(|c| (c.0, c.1, c.2, 1))
+                .collect();
+        } else {
+            // Duplicate and vary lightness
+            let base = candidates.clone();
+            while candidates.len() < 6 {
+                let src = &base[candidates.len() % base.len()];
+                let offset = (candidates.len() as f32) * 0.08;
+                let new_l = (src.2 + offset).min(0.85);
+                candidates.push((src.0, src.1, new_l, 1));
+            }
+        }
+    }
+    candidates.truncate(6);
+
+    // Sort by hue for smooth shader interpolation
+    candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+    // Convert HSL -> RGB, pack into [f32; 24]
+    let mut wheel = [0.0f32; 24];
+    for (i, (h, s, l, _)) in candidates.iter().enumerate() {
+        let (r, g, b) = hsl_to_rgb_f32(*h / 360.0, *s, *l);
+        wheel[i * 4] = r;
+        wheel[i * 4 + 1] = g;
+        wheel[i * 4 + 2] = b;
+        wheel[i * 4 + 3] = 1.0;
+    }
+
+    log::info!("Extracted {} colors from image: {:?}", candidates.len(), path);
+    Ok(wheel)
 }
 
 /// Convert noise strength setting to noise_multiplier value
@@ -934,6 +1079,53 @@ fn setup_menu_bar() {
         set_color_scheme(3, sender);
     }
 
+    extern "C" fn set_color_custom_image(_this: &Object, _cmd: Sel, sender: id) {
+        log::info!("set_color_custom_image action triggered");
+        // Open file dialog on a separate thread to avoid blocking the menu
+        std::thread::spawn(move || {
+            let dialog = rfd::FileDialog::new()
+                .add_filter("Images", &["png", "jpg", "jpeg", "bmp", "webp"])
+                .set_title("Choose an image for color theme");
+            if let Some(path) = dialog.pick_file() {
+                match extract_colors_from_image(&path) {
+                    Ok(wheel) => {
+                        // Store in global mutex
+                        if let Ok(mut guard) = custom_color_wheel().lock() {
+                            *guard = Some(wheel);
+                        }
+                        // Save to preferences
+                        let mut prefs = load_preferences();
+                        prefs.color_scheme = 4;
+                        prefs.custom_color_wheel = Some(wheel);
+                        prefs.custom_image_path = Some(path.to_string_lossy().to_string());
+                        save_preferences(&prefs);
+                        CURRENT_COLOR_SCHEME.store(4, Ordering::SeqCst);
+                        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+                        log::info!("Custom color theme extracted from: {:?}", path);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to extract colors: {}", e);
+                    }
+                }
+            } else {
+                log::info!("Custom image file dialog cancelled");
+            }
+        });
+        // Update checkmarks for the color menu (sender is the "Custom Image..." item)
+        unsafe {
+            let menu: id = msg_send![sender, menu];
+            if menu != nil {
+                let count: i64 = msg_send![menu, numberOfItems];
+                for i in 0..count {
+                    let item: id = msg_send![menu, itemAtIndex: i];
+                    let tag: i64 = msg_send![item, tag];
+                    let state: i64 = if tag == 4 { 1 } else { 0 };
+                    let _: () = msg_send![item, setState: state];
+                }
+            }
+        }
+    }
+
     fn set_color_scheme(scheme: u32, sender: id) {
         log::info!("Setting color scheme to: {}", scheme);
         CURRENT_COLOR_SCHEME.store(scheme, Ordering::SeqCst);
@@ -1203,13 +1395,29 @@ fn setup_menu_bar() {
 
         // Load saved preferences
         let prefs = load_preferences();
-        CURRENT_COLOR_SCHEME.store(prefs.color_scheme, Ordering::SeqCst);
+        // If custom image scheme is selected but no cached wheel, fall back to Original
+        let effective_scheme = if prefs.color_scheme == 4 && prefs.custom_color_wheel.is_none() {
+            0
+        } else {
+            prefs.color_scheme
+        };
+        CURRENT_COLOR_SCHEME.store(effective_scheme, Ordering::SeqCst);
         CURRENT_DENSITY.store(prefs.density, Ordering::SeqCst);
         CURRENT_NOISE_STRENGTH.store(prefs.noise_strength, Ordering::SeqCst);
         CURRENT_LINE_LENGTH.store(prefs.line_length, Ordering::SeqCst);
         CURRENT_LINE_WIDTH.store(prefs.line_width, Ordering::SeqCst);
         CURRENT_VIEW_SCALE.store(prefs.view_scale, Ordering::SeqCst);
         CURRENT_BRIGHTNESS.store(prefs.brightness, Ordering::SeqCst);
+
+        // Load cached custom color wheel if available
+        if prefs.color_scheme == 4 {
+            if let Some(wheel) = prefs.custom_color_wheel {
+                if let Ok(mut guard) = custom_color_wheel().lock() {
+                    *guard = Some(wheel);
+                }
+                log::info!("Loaded cached custom color wheel from preferences");
+            }
+        }
 
         // Register our action handler class (also as menu delegate)
         // Use a unique class name to avoid conflicts if app restarts
@@ -1231,6 +1439,7 @@ fn setup_menu_bar() {
             decl.add_method(sel!(setColorPlasma:), set_color_plasma as extern "C" fn(&Object, Sel, id));
             decl.add_method(sel!(setColorPoolside:), set_color_poolside as extern "C" fn(&Object, Sel, id));
             decl.add_method(sel!(setColorSpacegrey:), set_color_spacegrey as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(setColorCustomImage:), set_color_custom_image as extern "C" fn(&Object, Sel, id));
             decl.add_method(sel!(setDensitySparse:), set_density_sparse as extern "C" fn(&Object, Sel, id));
             decl.add_method(sel!(setDensityNormal:), set_density_normal as extern "C" fn(&Object, Sel, id));
             decl.add_method(sel!(setDensityDense:), set_density_dense as extern "C" fn(&Object, Sel, id));
@@ -1317,6 +1526,22 @@ fn setup_menu_bar() {
 
             color_menu.addItem_(item);
         }
+
+        // Separator before custom image option
+        let color_sep: id = msg_send![class!(NSMenuItem), separatorItem];
+        color_menu.addItem_(color_sep);
+
+        // "Custom Image..." menu item
+        let custom_title = NSString::alloc(nil).init_str("Custom Image...");
+        let custom_item: id = msg_send![class!(NSMenuItem), alloc];
+        let custom_item: id = msg_send![custom_item, initWithTitle:custom_title action:sel!(setColorCustomImage:) keyEquivalent:NSString::alloc(nil).init_str("")];
+        let _: () = msg_send![custom_item, setTarget: handler];
+        let _: () = msg_send![custom_item, setTag: 4i64];
+        let _: () = msg_send![custom_item, setEnabled: YES];
+        if prefs.color_scheme == 4 {
+            let _: () = msg_send![custom_item, setState: 1i64]; // NSOnState
+        }
+        color_menu.addItem_(custom_item);
 
         let _: () = msg_send![color_item, setSubmenu: color_menu];
         menu.addItem_(color_item);
@@ -1651,8 +1876,23 @@ fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
 
     let prefs = load_preferences();
 
+    // Load cached custom color wheel if available, or fall back
+    let effective_scheme = if prefs.color_scheme == 4 && prefs.custom_color_wheel.is_none() {
+        0
+    } else {
+        prefs.color_scheme
+    };
+    if prefs.color_scheme == 4 {
+        if let Some(wheel) = prefs.custom_color_wheel {
+            if let Ok(mut guard) = custom_color_wheel().lock() {
+                *guard = Some(wheel);
+            }
+            log::info!("Loaded cached custom color wheel from preferences (Windows)");
+        }
+    }
+
     // Load preferences into atomics
-    CURRENT_COLOR_SCHEME.store(prefs.color_scheme, Ordering::SeqCst);
+    CURRENT_COLOR_SCHEME.store(effective_scheme, Ordering::SeqCst);
     CURRENT_DENSITY.store(prefs.density, Ordering::SeqCst);
     CURRENT_NOISE_STRENGTH.store(prefs.noise_strength, Ordering::SeqCst);
     CURRENT_LINE_LENGTH.store(prefs.line_length, Ordering::SeqCst);
@@ -1669,10 +1909,13 @@ fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
     let color_plasma = CheckMenuItem::new("Plasma", true, prefs.color_scheme == 1, None);
     let color_poolside = CheckMenuItem::new("Poolside", true, prefs.color_scheme == 2, None);
     let color_spacegrey = CheckMenuItem::new("Space Grey", true, prefs.color_scheme == 3, None);
+    let color_custom = CheckMenuItem::new("Custom Image...", true, prefs.color_scheme == 4, None);
     let _ = color_submenu.append(&color_original);
     let _ = color_submenu.append(&color_plasma);
     let _ = color_submenu.append(&color_poolside);
     let _ = color_submenu.append(&color_spacegrey);
+    let _ = color_submenu.append(&muda::PredefinedMenuItem::separator());
+    let _ = color_submenu.append(&color_custom);
     let _ = menu.append(&color_submenu);
 
     // Density submenu
@@ -1786,7 +2029,7 @@ fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
     log::info!("Windows system tray created");
 
     // Extract string IDs before spawning thread (MenuId contains Rc which is not Send)
-    let color_ids: Vec<String> = [&color_original, &color_plasma, &color_poolside, &color_spacegrey]
+    let color_ids: Vec<String> = [&color_original, &color_plasma, &color_poolside, &color_spacegrey, &color_custom]
         .iter().map(|item| item.id().0.clone()).collect();
     let density_ids: Vec<String> = [&density_sparse, &density_normal, &density_dense]
         .iter().map(|item| item.id().0.clone()).collect();
@@ -1815,11 +2058,48 @@ fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
                 // Check color scheme
                 for (i, color_id) in color_ids.iter().enumerate() {
                     if id_str == color_id {
-                        CURRENT_COLOR_SCHEME.store(i as u32, Ordering::SeqCst);
-                        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
-                        let mut prefs = load_preferences();
-                        prefs.color_scheme = i as u32;
-                        save_preferences(&prefs);
+                        if i == 4 {
+                            // Custom Image - open file dialog
+                            let dialog = rfd::FileDialog::new()
+                                .add_filter("Images", &["png", "jpg", "jpeg", "bmp", "webp"])
+                                .set_title("Choose an image for color theme");
+                            if let Some(path) = dialog.pick_file() {
+                                match extract_colors_from_image(&path) {
+                                    Ok(wheel) => {
+                                        if let Ok(mut guard) = custom_color_wheel().lock() {
+                                            *guard = Some(wheel);
+                                        }
+                                        let mut prefs = load_preferences();
+                                        prefs.color_scheme = 4;
+                                        prefs.custom_color_wheel = Some(wheel);
+                                        prefs.custom_image_path = Some(path.to_string_lossy().to_string());
+                                        save_preferences(&prefs);
+                                        CURRENT_COLOR_SCHEME.store(4, Ordering::SeqCst);
+                                        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+                                        log::info!("Custom color theme extracted from: {:?}", path);
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to extract colors: {}", e);
+                                        continue;
+                                    }
+                                }
+                            } else {
+                                log::info!("Custom image file dialog cancelled");
+                                continue;
+                            }
+                        } else {
+                            CURRENT_COLOR_SCHEME.store(i as u32, Ordering::SeqCst);
+                            SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+                            let mut prefs = load_preferences();
+                            prefs.color_scheme = i as u32;
+                            save_preferences(&prefs);
+                        }
+                        // Update checkmarks for all 5 items
+                        color_original.set_checked(i == 0);
+                        color_plasma.set_checked(i == 1);
+                        color_poolside.set_checked(i == 2);
+                        color_spacegrey.set_checked(i == 3);
+                        color_custom.set_checked(i == 4);
                         log::info!("Color scheme changed to {}", i);
                     }
                 }
@@ -2154,7 +2434,7 @@ async fn run_wallpaper_multi(
 
         surface.configure(&device, &config);
 
-        let flux = Flux::new(
+        let mut flux = Flux::new(
             &device,
             &queue,
             swapchain_format,
@@ -2165,6 +2445,23 @@ async fn run_wallpaper_multi(
             &Arc::clone(&settings),
         )
         .unwrap();
+
+        // Inject cached custom color wheel on startup if scheme is Custom Image
+        if prefs.color_scheme == 4 {
+            if let Ok(guard) = custom_color_wheel().lock() {
+                if let Some(wheel) = *guard {
+                    let color_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("buffer:custom_color"),
+                        size: 4 * (wheel.len() as u64),
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                    queue.write_buffer(&color_buffer, 0, bytemuck::cast_slice(&wheel));
+                    flux.lines.update_color_bindings(&device, &queue, None, Some(color_buffer));
+                    log::info!("Injected cached custom color wheel on startup");
+                }
+            }
+        }
 
         window.set_visible(true);
 
@@ -2247,6 +2544,13 @@ async fn run_wallpaper_multi(
             new_settings.brightness_multiplier = brightness_to_multiplier(new_brightness);
             let new_settings = Arc::new(new_settings);
 
+            // Check if we have a custom color wheel to inject
+            let custom_wheel = if new_color == 4 {
+                custom_color_wheel().lock().ok().and_then(|g| *g)
+            } else {
+                None
+            };
+
             for renderer in &mut renderers {
                 // Check if density changed BEFORE updating (update overwrites settings)
                 let density_changed = renderer.flux.grid_spacing() != new_settings.grid_spacing;
@@ -2269,6 +2573,24 @@ async fn run_wallpaper_multi(
                         physical_size.width,
                         physical_size.height,
                     );
+                }
+
+                // Inject custom color wheel if scheme is Custom Image
+                if let Some(wheel) = custom_wheel {
+                    let color_buffer = renderer.device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("buffer:custom_color"),
+                        size: 4 * (wheel.len() as u64),
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                    renderer.queue.write_buffer(&color_buffer, 0, bytemuck::cast_slice(&wheel));
+                    renderer.flux.lines.update_color_bindings(
+                        &renderer.device,
+                        &renderer.queue,
+                        None,
+                        Some(color_buffer),
+                    );
+                    log::info!("Injected custom color wheel into renderer");
                 }
             }
         }

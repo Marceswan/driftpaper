@@ -25,7 +25,9 @@ serde_json.workspace = true
 tokio.workspace = true
 wgpu.workspace = true
 winit.workspace = true
+bytemuck.workspace = true
 clap = { version = "4", features = ["derive"] }
+rfd = "0.15"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"
