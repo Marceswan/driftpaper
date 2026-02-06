@@ -200,8 +200,10 @@ jobs:
           # Zip Windows executable
           cd windows && zip -r ../DriftPaper-Windows.zip DriftPaper.exe && cd ..
 
-          # Zip macOS app
-          cd macos-app && zip -r ../DriftPaper-macOS.zip DriftPaper.app && cd ..
+          # Restructure macOS app (artifact downloads without .app wrapper)
+          mkdir -p DriftPaper.app
+          mv macos-app/Contents DriftPaper.app/
+          zip -r DriftPaper-macOS.zip DriftPaper.app
 
       - name: Create tag
         env:
