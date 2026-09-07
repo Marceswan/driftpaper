@@ -13,6 +13,11 @@ mutagen.*
 # macOS
 .DS_Store
 
+# Private Apple signing and notarization credentials
+*.p12
+*.p8
+*.pfx
+
 # Temp extracted files
 AppIcons_extracted/
 node_modules

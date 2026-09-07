@@ -1,6 +1,7 @@
 name: Build and Release
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -9,10 +10,31 @@ concurrency:
   group: driftpaper-release
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  signing-config:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require Apple signing credentials
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: bash release/scripts/check-signing-config.sh
+
   checks:
     uses: ./.github/workflows/checks.yml
     permissions:
@@ -53,7 +75,7 @@ jobs:
           echo "tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
 
   build-windows:
-    needs: checks
+    needs: [checks, signing-config]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -88,7 +110,7 @@ jobs:
           path: artifact/windows/DriftPaper.exe
 
   build-macos:
-    needs: [checks, version]
+    needs: [checks, version, signing-config]
     runs-on: macos-latest
     strategy:
       matrix:
@@ -135,6 +157,7 @@ jobs:
   create-universal-macos:
     needs: build-macos
     runs-on: macos-latest
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
 
@@ -166,24 +189,28 @@ jobs:
           cp arm64-app/Contents/Resources/AppIcon.icns universal/DriftPaper.app/Contents/Resources/AppIcon.icns
           chmod +x universal/DriftPaper.app/Contents/MacOS/DriftPaper
 
-      - name: Create macOS DMG
-        run: |
-          hdiutil create -volname "DriftPaper" -srcfolder universal/DriftPaper.app -ov -format UDZO DriftPaper-macOS.dmg
-
-      - name: Package macOS ZIP and verify executable permissions
-        run: bash release/scripts/package-macos.sh universal/DriftPaper.app DriftPaper-macOS.zip
+      - name: Sign, notarize, and verify macOS downloads
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: bash release/scripts/sign-notarize-macos.sh universal/DriftPaper.app signed
 
       - name: Upload universal macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-universal-build
-          path: DriftPaper-macOS.zip
+          path: signed/DriftPaper-macOS.zip
 
       - name: Upload macOS DMG
         uses: actions/upload-artifact@v4
         with:
           name: macos-dmg
-          path: DriftPaper-macOS.dmg
+          path: signed/DriftPaper-macOS.dmg
 
   release:
     needs: [checks, version, build-windows, create-universal-macos]

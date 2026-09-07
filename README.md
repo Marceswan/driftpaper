@@ -147,3 +147,6 @@ also checks the packaged macOS executable permissions.
 
 See [validation and performance notes](docs/validation.md) for platform checks and
 profiling instructions.
+
+macOS releases require Developer ID signing and Apple notarization. See
+[signing setup](docs/macos-signing.md) for the GitHub Secrets and release process.

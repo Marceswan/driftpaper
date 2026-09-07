@@ -43,3 +43,5 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
       - name: Validate GPU pipelines and resize on Vulkan
         run: cargo test --locked -p flux -- --nocapture
+      - name: Verify signing failure gates and cleanup
+        run: python3 release/tests/test_macos_signing.py
