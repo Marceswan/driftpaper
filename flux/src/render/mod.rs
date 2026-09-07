@@ -1,3 +1,4 @@
+pub mod artwork;
 pub mod color;
 pub mod fluid;
 pub mod lines;

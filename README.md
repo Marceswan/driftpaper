@@ -15,6 +15,8 @@ DriftPaper runs as a menu bar app, rendering a beautiful fluid simulation as you
 
 | Setting | Options |
 |---------|---------|
+| **Animation** | Drift, Flowing Silk, Ink in Water, Living Topography |
+| **Animation Speed** | Slow, Normal, Fast (independent of frame rate) |
 | **Color Scheme** | Original, Plasma, Poolside, Space Grey |
 | **Density** | Sparse, Normal, Dense |
 | **Noise Strength** | Low, Medium, High, Max |
@@ -112,12 +114,38 @@ drift --help
 Options:
       --windowed     Run in normal window mode (not as wallpaper)
       --fps <FPS>    Override saved frame rate (1-240; default preference: 30)
+      --animation <ANIMATION>  drift, silk, ink, topography
+      --speed <SPEED>          slow, normal, fast
   -h, --help         Print help
 ```
 
 On macOS, wallpaper windows ignore mouse input (including right-click) and cannot take keyboard focus, allowing desktop interaction through Finder.
 
 By default, DriftPaper runs as a wallpaper. Use `--windowed` to run in a normal window for testing or preview.
+
+### Animation modes
+
+Choose **Animation** in the macOS menu bar or Windows tray. Flowing Silk draws
+soft, illuminated folds; Ink in Water carries pigment through the fluid; Living
+Topography draws moving elevation contours. Drift remains the default for existing
+installations. Mode and speed are saved alongside your palette.
+
+Color Scheme, Brightness, Noise Strength, View Scale and Animation Speed apply
+across modes. Density controls Drift's line grid and Topography's contour spacing;
+Line Length and Line Width apply to Drift. Switching modes preserves these choices.
+Ink starts with fresh pigment when selected or when its simulation size changes.
+
+Preview without changing saved preferences:
+
+```sh
+./target/release/drift --windowed --animation silk --speed slow
+./target/release/drift --windowed --animation ink
+./target/release/drift --windowed --animation topography
+```
+
+The new modes share cached GPU programs. Silk and Topography skip fluid solving
+and line placement; Ink uses two dye textures capped at 1024 texels on the longest
+side. The existing sleep, frame-rate, and multi-display behavior applies to all modes.
 
 ## Credits
 

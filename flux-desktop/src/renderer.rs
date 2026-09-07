@@ -120,6 +120,11 @@ impl DisplayRenderer {
 
 fn current_settings() -> Arc<Settings> {
     let mut settings = Settings {
+        animation: flux::settings::Animation::from_index(CURRENT_ANIMATION.load(Ordering::SeqCst)),
+        animation_speed: SPEED_VALUES
+            .get(CURRENT_ANIMATION_SPEED.load(Ordering::SeqCst) as usize)
+            .copied()
+            .unwrap_or(1.0),
         color_mode: scheme_to_color_mode(CURRENT_COLOR_SCHEME.load(Ordering::SeqCst)),
         grid_spacing: density_to_grid_spacing(CURRENT_DENSITY.load(Ordering::SeqCst)),
         noise_multiplier: noise_strength_to_multiplier(

@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub(crate) struct UserPreferences {
     pub(crate) color_scheme: u32,
+    pub(crate) animation: u32,
+    pub(crate) animation_speed: u32,
     pub(crate) density: u32,
     pub(crate) noise_strength: u32,
     pub(crate) line_length: u32,
@@ -24,6 +26,8 @@ impl Default for UserPreferences {
     fn default() -> Self {
         Self {
             color_scheme: 0,
+            animation: 0,
+            animation_speed: 1,
             density: 1,
             noise_strength: 1, // Medium
             line_length: 1,    // Medium
@@ -60,6 +64,12 @@ static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 impl UserPreferences {
     fn validate(&mut self) {
+        if self.animation >= flux::settings::Animation::ALL.len() as u32 {
+            self.animation = 0;
+        }
+        if self.animation_speed > 2 {
+            self.animation_speed = 1;
+        }
         if !(1..=240).contains(&self.fps) {
             self.fps = 30;
         }
@@ -155,6 +165,8 @@ mod tests {
         assert_eq!(prefs.fps, 30);
         assert_eq!(prefs.color_scheme, 0);
         assert_eq!(prefs.brightness, 1);
+        assert_eq!(prefs.animation, 0);
+        assert_eq!(prefs.animation_speed, 1);
     }
     #[test]
     fn atomic_replacement_preserves_complete_palette_and_fps() {
@@ -163,13 +175,30 @@ mod tests {
         let mut prefs = UserPreferences::default();
         write_preferences(&path, &prefs).unwrap();
         prefs.fps = 60;
+        prefs.animation = 2;
+        prefs.animation_speed = 0;
         prefs.color_scheme = 4;
         prefs.custom_color_wheel = Some([0.5; 24]);
         write_preferences(&path, &prefs).unwrap();
         let loaded = read_preferences(&path);
         assert_eq!(loaded.fps, 60);
+        assert_eq!(loaded.animation, 2);
+        assert_eq!(loaded.animation_speed, 0);
         assert_eq!(loaded.custom_color_wheel, prefs.custom_color_wheel);
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+    #[test]
+    fn invalid_animation_preferences_preserve_other_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        std::fs::write(
+            &path,
+            r#"{"animation":99,"animation_speed":99,"fps":60,"color_scheme":2}"#,
+        )
+        .unwrap();
+        let prefs = read_preferences(&path);
+        assert_eq!((prefs.animation, prefs.animation_speed), (0, 1));
+        assert_eq!((prefs.fps, prefs.color_scheme), (60, 2));
     }
     #[test]
     fn failed_write_returns_an_error_without_replacing_destination() {

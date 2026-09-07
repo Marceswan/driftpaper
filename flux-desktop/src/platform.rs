@@ -837,6 +837,34 @@ pub(crate) fn setup_menu_bar() {
         }
     }
 
+    fn set_animation_option(sender: id, speed: bool) {
+        unsafe {
+            let value: i64 = msg_send![sender, tag];
+            if speed {
+                CURRENT_ANIMATION_SPEED.store(value as u32, Ordering::SeqCst);
+                update_preferences(|prefs| prefs.animation_speed = value as u32);
+            } else {
+                CURRENT_ANIMATION.store(value as u32, Ordering::SeqCst);
+                update_preferences(|prefs| prefs.animation = value as u32);
+            }
+            SETTINGS_CHANGED.store(true, Ordering::SeqCst);
+            wake();
+            let menu: id = msg_send![sender, menu];
+            let count: i64 = msg_send![menu, numberOfItems];
+            for i in 0..count {
+                let item: id = msg_send![menu, itemAtIndex: i];
+                let tag: i64 = msg_send![item, tag];
+                let _: () = msg_send![item, setState: if tag == value { 1i64 } else { 0i64 }];
+            }
+        }
+    }
+    extern "C" fn set_animation(_this: &Object, _cmd: Sel, sender: id) {
+        set_animation_option(sender, false);
+    }
+    extern "C" fn set_animation_speed(_this: &Object, _cmd: Sel, sender: id) {
+        set_animation_option(sender, true);
+    }
+
     extern "C" fn set_fps(_this: &Object, _cmd: Sel, sender: id) {
         unsafe {
             let fps: i64 = msg_send![sender, tag];
@@ -926,6 +954,14 @@ pub(crate) fn setup_menu_bar() {
             // Create new class
             let superclass = class!(NSObject);
             let mut decl = ClassDecl::new(class_name, superclass).unwrap();
+            decl.add_method(
+                sel!(setAnimation:),
+                set_animation as extern "C" fn(&Object, Sel, id),
+            );
+            decl.add_method(
+                sel!(setAnimationSpeed:),
+                set_animation_speed as extern "C" fn(&Object, Sel, id),
+            );
             decl.add_method(sel!(setFps:), set_fps as extern "C" fn(&Object, Sel, id));
             decl.add_method(
                 sel!(quitAction:),
@@ -1067,6 +1103,43 @@ pub(crate) fn setup_menu_bar() {
         let menu = NSMenu::new(nil).autorelease();
         let _: () = msg_send![menu, setDelegate: handler];
         let _: () = msg_send![menu, setAutoenablesItems: NO]; // Prevent auto-disabling of items
+
+        for (title, names, action, selected) in [
+            (
+                "Animation",
+                flux::settings::Animation::LABELS.as_slice(),
+                sel!(setAnimation:),
+                CURRENT_ANIMATION.load(Ordering::SeqCst),
+            ),
+            (
+                "Animation Speed",
+                SPEED_LABELS.as_slice(),
+                sel!(setAnimationSpeed:),
+                CURRENT_ANIMATION_SPEED.load(Ordering::SeqCst),
+            ),
+        ] {
+            let root = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+                NSString::alloc(nil).init_str(title),
+                selector(""),
+                NSString::alloc(nil).init_str(""),
+            );
+            let submenu = NSMenu::new(nil).autorelease();
+            let _: () = msg_send![submenu, setAutoenablesItems: NO];
+            for (i, name) in names.iter().enumerate() {
+                let item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+                    NSString::alloc(nil).init_str(name),
+                    action,
+                    NSString::alloc(nil).init_str(""),
+                );
+                let _: () = msg_send![item, setTarget: handler];
+                let _: () = msg_send![item, setTag: i as i64];
+                let _: () =
+                    msg_send![item, setState: if i as u32 == selected { 1i64 } else { 0i64 }];
+                submenu.addItem_(item);
+            }
+            let _: () = msg_send![root, setSubmenu: submenu];
+            menu.addItem_(root);
+        }
 
         // ===== Color Scheme Submenu =====
         let color_title = NSString::alloc(nil).init_str("Color Scheme");
@@ -1631,6 +1704,41 @@ pub(crate) fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
         fps_values.push(current_fps);
         fps_values.sort();
     }
+    let animation_submenu = Submenu::new("Animation", true);
+    let animation_items: Vec<_> = flux::settings::Animation::LABELS
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            CheckMenuItem::new(
+                *name,
+                true,
+                i as u32 == CURRENT_ANIMATION.load(Ordering::SeqCst),
+                None,
+            )
+        })
+        .collect();
+    for item in &animation_items {
+        let _ = animation_submenu.append(item);
+    }
+    let _ = menu.append(&animation_submenu);
+    let speed_submenu = Submenu::new("Animation Speed", true);
+    let speed_items: Vec<_> = SPEED_LABELS
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            CheckMenuItem::new(
+                *name,
+                true,
+                i as u32 == CURRENT_ANIMATION_SPEED.load(Ordering::SeqCst),
+                None,
+            )
+        })
+        .collect();
+    for item in &speed_items {
+        let _ = speed_submenu.append(item);
+    }
+    let _ = menu.append(&speed_submenu);
+
     let fps_items: Vec<_> = fps_values
         .iter()
         .map(|&fps| CheckMenuItem::new(format!("{fps} FPS"), true, fps == current_fps, None))
@@ -1753,8 +1861,19 @@ pub(crate) fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
                 vec![0, 1, 2, 3],
             ),
             (fps_items.clone(), &CURRENT_FPS, fps_values.clone()),
+            (
+                animation_items.clone(),
+                &CURRENT_ANIMATION,
+                vec![0, 1, 2, 3],
+            ),
+            (speed_items.clone(), &CURRENT_ANIMATION_SPEED, vec![0, 1, 2]),
         ];
     });
+    let animation_ids: Vec<_> = animation_items
+        .iter()
+        .map(|item| item.id().0.clone())
+        .collect();
+    let speed_ids: Vec<_> = speed_items.iter().map(|item| item.id().0.clone()).collect();
     let fps_ids: Vec<_> = fps_items.iter().map(|item| item.id().0.clone()).collect();
 
     // Extract string IDs before spawning thread (MenuId contains Rc which is not Send)
@@ -1813,6 +1932,19 @@ pub(crate) fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
                     if id == id_str {
                         CURRENT_FPS.store(*fps, Ordering::SeqCst);
                         update_preferences(|prefs| prefs.fps = *fps);
+                        wake();
+                    }
+                }
+                for (ids, speed) in [(&animation_ids, false), (&speed_ids, true)] {
+                    if let Some(index) = ids.iter().position(|id| id == id_str) {
+                        if speed {
+                            CURRENT_ANIMATION_SPEED.store(index as u32, Ordering::SeqCst);
+                            update_preferences(|prefs| prefs.animation_speed = index as u32);
+                        } else {
+                            CURRENT_ANIMATION.store(index as u32, Ordering::SeqCst);
+                            update_preferences(|prefs| prefs.animation = index as u32);
+                        }
+                        SETTINGS_CHANGED.store(true, Ordering::SeqCst);
                         wake();
                     }
                 }

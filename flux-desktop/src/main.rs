@@ -21,6 +21,11 @@ use winit::window::{Window, WindowBuilder, WindowLevel};
 // Global flag to signal quit from menu bar
 static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
 
+static CURRENT_ANIMATION: AtomicU32 = AtomicU32::new(0);
+static CURRENT_ANIMATION_SPEED: AtomicU32 = AtomicU32::new(1);
+const SPEED_LABELS: [&str; 3] = ["Slow", "Normal", "Fast"];
+const SPEED_VALUES: [f32; 3] = [0.5, 1.0, 2.0];
+
 // Global settings for menu control
 static CURRENT_COLOR_SCHEME: AtomicU32 = AtomicU32::new(0); // 0=Original, 1=Plasma, 2=Poolside, 3=SpaceGrey
 static CURRENT_DENSITY: AtomicU32 = AtomicU32::new(1); // 0=Sparse, 1=Normal, 2=Dense
@@ -56,6 +61,14 @@ struct Args {
     /// Target FPS override (1-240); otherwise use the saved preference (default: 30)
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..=240))]
     fps: Option<u32>,
+
+    /// Animation override; does not overwrite the saved preference
+    #[arg(long, value_parser = ["drift", "silk", "ink", "topography"])]
+    animation: Option<String>,
+
+    /// Animation speed override, independent of FPS
+    #[arg(long, value_parser = ["slow", "normal", "fast"])]
+    speed: Option<String>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -67,6 +80,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     power::install_proxy(event_loop.create_proxy());
     let prefs = load_preferences();
     CURRENT_FPS.store(args.fps.unwrap_or(prefs.fps), Ordering::SeqCst);
+    let animation = args
+        .animation
+        .as_deref()
+        .and_then(|name| {
+            ["drift", "silk", "ink", "topography"]
+                .iter()
+                .position(|v| *v == name)
+        })
+        .map(|i| i as u32)
+        .unwrap_or(prefs.animation);
+    let speed = args
+        .speed
+        .as_deref()
+        .and_then(|name| ["slow", "normal", "fast"].iter().position(|v| *v == name))
+        .map(|i| i as u32)
+        .unwrap_or(prefs.animation_speed);
+    CURRENT_ANIMATION.store(animation, Ordering::SeqCst);
+    CURRENT_ANIMATION_SPEED.store(speed, Ordering::SeqCst);
     CURRENT_COLOR_SCHEME.store(prefs.color_scheme, Ordering::SeqCst);
     CURRENT_DENSITY.store(prefs.density, Ordering::SeqCst);
     CURRENT_NOISE_STRENGTH.store(prefs.noise_strength, Ordering::SeqCst);
@@ -95,6 +126,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn animation_preview_options_are_validated() {
+        let args = Args::try_parse_from([
+            "drift",
+            "--windowed",
+            "--animation",
+            "ink",
+            "--speed",
+            "slow",
+        ])
+        .unwrap();
+        assert_eq!(args.animation.as_deref(), Some("ink"));
+        assert_eq!(args.speed.as_deref(), Some("slow"));
+        assert!(args.windowed);
+        assert!(Args::try_parse_from(["drift", "--animation", "missing"]).is_err());
+        assert!(Args::try_parse_from(["drift", "--speed", "0"]).is_err());
+    }
     #[test]
     fn rejects_invalid_fps_before_opening_windows() {
         for value in ["0", "241", "-1"] {

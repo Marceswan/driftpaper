@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub mode: Mode,
+    pub animation: Animation,
+    /// Simulation speed, independent of display frame rate (0.25–2.0).
+    pub animation_speed: f32,
     pub seed: Option<String>,
 
     pub fluid_size: u32,
@@ -36,6 +39,8 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             mode: Mode::Normal,
+            animation: Animation::Drift,
+            animation_speed: 1.0,
             seed: None,
             fluid_size: 128,
             fluid_frame_rate: 60.0,
@@ -72,6 +77,51 @@ impl Default for Settings {
             ],
             brightness_multiplier: 1.0,
         }
+    }
+}
+
+#[derive(Copy, Clone, Default, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[repr(u32)]
+pub enum Animation {
+    #[default]
+    Drift,
+    Silk,
+    Ink,
+    Topography,
+}
+
+impl Animation {
+    pub const ALL: [Self; 4] = [Self::Drift, Self::Silk, Self::Ink, Self::Topography];
+    pub const LABELS: [&'static str; 4] =
+        ["Drift", "Flowing Silk", "Ink in Water", "Living Topography"];
+
+    pub fn from_index(index: u32) -> Self {
+        Self::ALL.get(index as usize).copied().unwrap_or_default()
+    }
+}
+
+impl Settings {
+    /// Surface modes emphasize broad structures without overwriting the user's channels.
+    pub(crate) fn noise_profile(&self) -> Self {
+        let mut profile = self.clone();
+        for (index, channel) in profile.noise_channels.iter_mut().enumerate() {
+            match self.animation {
+                Animation::Silk => {
+                    channel.scale *= 0.45;
+                    if index > 0 {
+                        channel.multiplier *= 0.045;
+                    }
+                }
+                Animation::Topography => {
+                    channel.scale *= 0.55;
+                    if index > 0 {
+                        channel.multiplier *= 0.12;
+                    }
+                }
+                _ => {}
+            }
+        }
+        profile
     }
 }
 
@@ -189,3 +239,25 @@ pub static COLOR_SCHEME_SPACE_GREY: [f32; 24] = [
     140.0 / 255.0, 140.0 / 255.0, 140.0 / 255.0, 1.0,   // Medium-light grey
     180.0 / 255.0, 180.0 / 255.0, 180.0 / 255.0, 1.0,   // Lighter grey (70% luminance)
 ];
+
+#[cfg(test)]
+mod animation_tests {
+    use super::*;
+    #[test]
+    fn old_settings_default_to_drift_and_normal_speed() {
+        let settings: Settings = serde_json::from_str(r#"{"brightnessMultiplier":0.5}"#).unwrap();
+        assert_eq!(settings.animation, Animation::Drift);
+        assert_eq!(settings.animation_speed, 1.0);
+        assert_eq!(settings.brightness_multiplier, 0.5);
+        for animation in Animation::ALL {
+            let settings = Settings {
+                animation,
+                animation_speed: 0.5,
+                ..Default::default()
+            };
+            let restored: Settings =
+                serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+            assert_eq!(settings, restored);
+        }
+    }
+}

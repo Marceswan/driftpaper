@@ -21,6 +21,8 @@ pub struct Flux {
     pub lines: render::lines::Context,
     noise_generator: render::noise::NoiseGenerator,
     debug_texture: render::texture::Context,
+    artwork: Option<render::artwork::Context>,
+    color_texture: Option<wgpu::TextureView>,
 
     pub color_image: Arc<Mutex<Option<image::RgbaImage>>>,
 
@@ -47,11 +49,19 @@ impl Flux {
             || settings.fluid_size == 0
             || !settings.fluid_timestep.is_finite()
             || settings.fluid_timestep <= 0.0
+            || !settings.animation_speed.is_finite()
+            || !(0.25..=2.0).contains(&settings.animation_speed)
         {
-            log::warn!("Ignoring invalid simulation dimensions or timestep");
+            log::warn!("Ignoring invalid simulation dimensions, timestep or animation speed");
             return;
         }
         let resize_grid = self.settings.grid_spacing != settings.grid_spacing;
+        if self.settings.color_mode != settings.color_mode {
+            self.color_texture = None;
+            if let Some(artwork) = &mut self.artwork {
+                artwork.clear_color_image();
+            }
+        }
         self.settings = Arc::clone(settings);
         if resize_grid {
             self.resize(
@@ -67,7 +77,8 @@ impl Flux {
                 .update(device, queue, self.logical_size, &self.grid, &self.settings);
             self.resize_simulation(device, queue);
         }
-        self.noise_generator.update(device, &self.settings);
+        self.noise_generator
+            .update(device, &self.settings.noise_profile());
     }
 
     fn resize_simulation(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
@@ -110,6 +121,10 @@ impl Flux {
         queue: &wgpu::Queue,
         texture_view: wgpu::TextureView,
     ) {
+        self.color_texture = Some(texture_view.clone());
+        if let Some(artwork) = &mut self.artwork {
+            artwork.set_color_image(device, &texture_view);
+        }
         self.lines
             .update_color_bindings(device, queue, Some(texture_view), None);
     }
@@ -159,9 +174,11 @@ impl Flux {
             || settings.fluid_size == 0
             || !settings.fluid_timestep.is_finite()
             || settings.fluid_timestep <= 0.0
+            || !settings.animation_speed.is_finite()
+            || !(0.25..=2.0).contains(&settings.animation_speed)
         {
             return Err(
-                "Dimensions, grid spacing, fluid size and timestep must be positive and finite"
+                "Dimensions, grid spacing, fluid size and timestep must be positive and finite; animation speed must be 0.25–2.0"
                     .into(),
             );
         }
@@ -204,12 +221,13 @@ impl Flux {
             resources,
         );
 
+        let noise_settings = Arc::new(settings.noise_profile());
         let mut noise_generator_builder = render::noise::NoiseGeneratorBuilder::new(
             2 * settings.fluid_size,
             grid.scaling_ratio,
-            settings,
+            &noise_settings,
         );
-        settings.noise_channels.iter().for_each(|channel| {
+        noise_settings.noise_channels.iter().for_each(|channel| {
             noise_generator_builder.add_channel(channel);
         });
         let noise_generator =
@@ -239,6 +257,8 @@ impl Flux {
             lines,
             noise_generator,
             debug_texture,
+            artwork: None,
+            color_texture: None,
             color_image: Arc::new(Mutex::new(None)),
 
             last_timestamp: 0.0,
@@ -328,6 +348,7 @@ impl Flux {
             (0.001 * (timestamp - self.last_timestamp) as f32).max(0.0),
         );
 
+        let timestep = timestep * self.settings.animation_speed;
         self.last_timestamp = timestamp;
         self.elapsed_time += timestep;
         self.fluid_frame_time += timestep;
@@ -338,6 +359,40 @@ impl Flux {
             self.elapsed_time = timer_overflow;
         }
 
+        let surfaces = self.settings.animation != settings::Animation::Drift;
+        if surfaces {
+            if self.artwork.is_none() {
+                let mut artwork = render::artwork::Context::new(
+                    device,
+                    self.swapchain_format,
+                    self.noise_generator.get_noise_texture_view(),
+                    &self.resources,
+                );
+                if let Some(view) = &self.color_texture {
+                    artwork.set_color_image(device, view);
+                }
+                self.artwork = Some(artwork);
+            }
+            let artwork = self.artwork.as_mut().unwrap();
+            artwork.sync(
+                device,
+                self.noise_generator.get_noise_texture_view(),
+                self.fluid.get_fluid_size(),
+                &self.settings,
+            );
+            artwork.update_uniforms(
+                queue,
+                &self.settings,
+                self.grid.aspect_ratio,
+                Default::default(),
+            );
+        } else {
+            self.artwork = None;
+        }
+        let needs_fluid = matches!(
+            self.settings.animation,
+            settings::Animation::Drift | settings::Animation::Ink
+        ) || self.settings.mode != settings::Mode::Normal;
         while self.fluid_frame_time >= self.settings.fluid_timestep {
             self.noise_generator
                 .update_buffers(device, encoder, self.settings.fluid_timestep);
@@ -349,28 +404,40 @@ impl Flux {
 
             self.noise_generator.generate(&mut cpass);
 
-            self.fluid.advect_forward(queue, &mut cpass);
-            self.fluid.advect_reverse(queue, &mut cpass);
-            self.fluid.adjust_advection(&mut cpass);
-            self.fluid.diffuse(&mut cpass);
+            if needs_fluid {
+                self.fluid.advect_forward(queue, &mut cpass);
+                self.fluid.advect_reverse(queue, &mut cpass);
+                self.fluid.adjust_advection(&mut cpass);
+                self.fluid.diffuse(&mut cpass);
 
-            let velocity_bind_group = self.fluid.get_write_velocity_bind_group();
-            self.noise_generator.inject_noise_into(
-                &mut cpass,
-                velocity_bind_group,
-                self.fluid.get_fluid_size(),
-            );
+                let velocity_bind_group = self.fluid.get_write_velocity_bind_group();
+                self.noise_generator.inject_noise_into(
+                    &mut cpass,
+                    velocity_bind_group,
+                    self.fluid.get_fluid_size(),
+                );
 
-            self.fluid.calculate_divergence(&mut cpass);
-            self.fluid.solve_pressure(queue, &mut cpass);
-            self.fluid.subtract_gradient(&mut cpass);
+                self.fluid.calculate_divergence(&mut cpass);
+                self.fluid.solve_pressure(queue, &mut cpass);
+                self.fluid.subtract_gradient(&mut cpass);
+            }
+            if self.settings.animation == settings::Animation::Ink {
+                self.artwork
+                    .as_mut()
+                    .unwrap()
+                    .step(&mut cpass, self.fluid.get_read_velocity_bind_group());
+            }
 
             self.fluid_frame_time -= self.settings.fluid_timestep;
         }
 
-        {
-            self.lines
-                .tick_line_uniforms(device, queue, timestep, self.elapsed_time);
+        if !surfaces {
+            self.lines.tick_line_uniforms(
+                device,
+                queue,
+                timestep.min(MAX_FRAME_TIME),
+                self.elapsed_time,
+            );
 
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("flux::place_lines"),
@@ -417,9 +484,19 @@ impl Flux {
                             render::ViewTransform::from_screen_viewport(&self.physical_size, sv)
                         })
                         .unwrap_or_default();
-                    self.lines.set_view_transform(queue, view_transform);
-                    self.lines.draw_lines(&mut rpass);
-                    self.lines.draw_endpoints(&mut rpass);
+                    if let Some(artwork) = &self.artwork {
+                        artwork.update_uniforms(
+                            queue,
+                            &self.settings,
+                            self.grid.aspect_ratio,
+                            view_transform,
+                        );
+                        artwork.draw(&mut rpass);
+                    } else {
+                        self.lines.set_view_transform(queue, view_transform);
+                        self.lines.draw_lines(&mut rpass);
+                        self.lines.draw_endpoints(&mut rpass);
+                    }
                 }
                 DebugNoise => {
                     self.debug_texture.draw_texture(device, &mut rpass, "noise");
@@ -464,6 +541,128 @@ impl Flux {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpu_animation_modes_evolve_recolor_and_resize() {
+        let Some((device, queue)) = crate::test_support::gpu() else {
+            return;
+        };
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let resources = Arc::new(SharedResources::new(&device));
+        let mut settings = Arc::new(Settings {
+            seed: Some("synthetic-preview".into()),
+            fluid_size: 64,
+            color_mode: settings::ColorMode::Preset(settings::ColorPreset::Poolside),
+            ..Default::default()
+        });
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let mut flux = Flux::new_with_resources(
+            &device, &queue, format, 1280, 800, 640, 400, &settings, &resources,
+        )
+        .unwrap();
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("animation verification"),
+            size: wgpu::Extent3d {
+                width: 640,
+                height: 400,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = target.create_view(&Default::default());
+        let mut time = 0.0;
+        let mut previous_mode = Vec::new();
+        for animation in [
+            settings::Animation::Silk,
+            settings::Animation::Ink,
+            settings::Animation::Topography,
+        ] {
+            Arc::make_mut(&mut settings).animation = animation;
+            flux.update(&device, &queue, &settings);
+            let warmup = if std::env::var_os("DRIFTPAPER_PREVIEW_DIR").is_some() {
+                300
+            } else {
+                90
+            };
+            for _ in 0..warmup {
+                time += 1000.0 / 30.0;
+                let mut encoder = device.create_command_encoder(&Default::default());
+                flux.animate(&device, &queue, &mut encoder, &view, None, time);
+                queue.submit([encoder.finish()]);
+            }
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            if let Some(error) = pollster::block_on(device.pop_error_scope()) {
+                panic!("{animation:?}: {error}");
+            }
+            device.push_error_scope(wgpu::ErrorFilter::Validation);
+            let first = crate::test_support::read_texture(&device, &queue, &target, 4);
+            assert!(
+                first
+                    .chunks_exact(4)
+                    .filter(|p| p[..3].iter().any(|&c| c > 12))
+                    .count()
+                    > 2000,
+                "{animation:?} should draw visible artwork"
+            );
+            assert!(first != previous_mode, "modes must have distinct output");
+            if let Ok(directory) = std::env::var("DRIFTPAPER_PREVIEW_DIR") {
+                std::fs::create_dir_all(&directory).unwrap();
+                image::RgbaImage::from_raw(640, 400, first.clone())
+                    .unwrap()
+                    .save(std::path::Path::new(&directory).join(format!("{animation:?}.png")))
+                    .unwrap();
+            }
+            for _ in 0..30 {
+                time += 1000.0 / 30.0;
+                let mut encoder = device.create_command_encoder(&Default::default());
+                flux.animate(&device, &queue, &mut encoder, &view, None, time);
+                queue.submit([encoder.finish()]);
+            }
+            let later = crate::test_support::read_texture(&device, &queue, &target, 4);
+            assert!(first != later, "{animation:?} must animate");
+            // Recolor with no time advance to prove palette is independent of motion.
+            Arc::make_mut(&mut settings).color_mode = settings::ColorMode::Custom([0.2; 24]);
+            flux.update(&device, &queue, &settings);
+            let mut encoder = device.create_command_encoder(&Default::default());
+            flux.animate(&device, &queue, &mut encoder, &view, None, time);
+            queue.submit([encoder.finish()]);
+            let recolored = crate::test_support::read_texture(&device, &queue, &target, 4);
+            assert!(
+                later != recolored,
+                "{animation:?} must respond to palette changes"
+            );
+            Arc::make_mut(&mut settings).color_mode =
+                settings::ColorMode::Preset(settings::ColorPreset::Poolside);
+            flux.update(&device, &queue, &settings);
+            let counts = resources.program_counts();
+            for (width, height) in [(800, 1280), (3200, 800), (1280, 800)] {
+                flux.resize(&device, &queue, width, height, 640, 400);
+                time += 50.0;
+                let mut encoder = device.create_command_encoder(&Default::default());
+                flux.animate(&device, &queue, &mut encoder, &view, None, time);
+                queue.submit([encoder.finish()]);
+            }
+            assert_eq!(
+                counts,
+                resources.program_counts(),
+                "resize must reuse programs"
+            );
+            previous_mode = first;
+        }
+        Arc::make_mut(&mut settings).animation = settings::Animation::Drift;
+        flux.update(&device, &queue, &settings);
+        let mut encoder = device.create_command_encoder(&Default::default());
+        flux.animate(&device, &queue, &mut encoder, &view, None, time + 50.0);
+        queue.submit([encoder.finish()]);
+        assert!(flux.artwork.is_none(), "Drift releases the extra renderer");
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert!(pollster::block_on(device.pop_error_scope()).is_none());
+    }
 
     #[test]
     fn gpu_resize_palette_and_shared_programs() {

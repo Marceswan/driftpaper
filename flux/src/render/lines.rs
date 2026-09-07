@@ -77,12 +77,12 @@ impl LineUniforms {
         const BASE_OFFSET: f32 = 0.0015;
 
         let perturb = 1.0 + 0.2 * (0.010 * elapsed_time * std::f32::consts::TAU).sin();
-        let offset = BASE_OFFSET * perturb;
+        let offset = BASE_OFFSET * perturb * timestep * 60.0;
         self.line_noise_offset_1 += offset;
 
         if self.line_noise_offset_1 > BLEND_THRESHOLD {
             self.line_noise_offset_2 += offset;
-            self.line_noise_blend_factor += BASE_OFFSET;
+            self.line_noise_blend_factor += BASE_OFFSET * timestep * 60.0;
         }
 
         if self.line_noise_blend_factor > 1.0 {
