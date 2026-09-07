@@ -6,6 +6,7 @@ use wgpu::util::DeviceExt;
 
 pub struct NoiseGenerator {
     elapsed_time: f32, // TODO: reset
+    linear_sampler: wgpu::Sampler,
 
     texture: wgpu::Texture,
     texture_view: wgpu::TextureView,
@@ -28,10 +29,6 @@ pub struct NoiseGenerator {
 
 impl NoiseGenerator {
     pub fn resize(&mut self, device: &wgpu::Device, size: u32, scaling_ratio: grid::ScalingRatio) {
-        if scaling_ratio == self.scaling_ratio {
-            return;
-        }
-
         let (width, height) = (
             size * scaling_ratio.rounded_x(),
             size * scaling_ratio.rounded_y(),
@@ -42,51 +39,118 @@ impl NoiseGenerator {
             depth_or_array_layers: 1,
         };
 
+        self.scaling_ratio = scaling_ratio;
+        if self.texture.size() == size {
+            return;
+        }
         let (texture, texture_view) = create_texture(device, &size);
 
         self.scaling_ratio = scaling_ratio;
         self.texture = texture;
         self.texture_view = texture_view;
+        self.rebuild_bindings(device);
     }
 
-    pub fn update(&mut self, new_settings: &settings::Settings) {
+    fn rebuild_bindings(&mut self, device: &wgpu::Device) {
+        self.bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bind_group:noise"),
+            layout: &self.generate_noise_pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.channel_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&self.texture_view),
+                },
+            ],
+        });
+        self.inject_noise_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bind_group:inject_noise"),
+            layout: &self.inject_noise_pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.push_constants_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.linear_sampler),
+                },
+            ],
+        });
+    }
+
+    pub fn update(&mut self, device: &wgpu::Device, new_settings: &settings::Settings) {
         self.uniforms.multiplier = new_settings.noise_multiplier;
-        self.channel_settings = new_settings.noise_channels.to_vec();
+        if self.channel_settings == new_settings.noise_channels {
+            return;
+        }
+        self.channels.truncate(new_settings.noise_channels.len());
+        for settings in new_settings.noise_channels.iter().skip(self.channels.len()) {
+            self.channels
+                .push(NoiseChannel::new(self.scaling_ratio, settings));
+        }
+        // A runtime-sized storage array requires at least one element.
+        if self.channels.is_empty() {
+            self.channels.push(bytemuck::Zeroable::zeroed());
+        }
+        let required_size = std::mem::size_of_val(self.channels.as_slice()) as u64;
+        if self.channel_buffer.size() != required_size {
+            self.channel_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("storage:noise_channels"),
+                size: required_size,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.rebuild_bindings(device);
+        }
+        self.channel_settings
+            .clone_from(&new_settings.noise_channels);
     }
 
-    pub fn update_buffers(&mut self, queue: &wgpu::Queue, timestep: f32) {
+    pub fn update_buffers(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        timestep: f32,
+    ) {
         self.elapsed_time += timestep;
-
         self.channels
             .iter_mut()
-            .zip(self.channel_settings.iter())
-            .for_each(|(channel, channel_settings)| {
-                channel.tick(channel_settings, self.elapsed_time);
+            .zip(&self.channel_settings)
+            .for_each(|(channel, settings)| {
+                channel.tick(settings, self.elapsed_time);
             });
-
-        queue.write_buffer(
-            &self.push_constants_buffer,
-            0,
-            bytemuck::cast_slice(&[0.0, 0.0, 0.0, timestep]),
-        );
-
-        queue.write_buffer(
-            &self.uniform_buffer,
-            0,
-            bytemuck::cast_slice(&[self.uniforms]),
-        );
-
-        queue.write_buffer(
-            &self.channel_buffer,
-            0,
-            bytemuck::cast_slice(&self.channels),
-        );
+        // Queue writes all run before submission. Encode copies so each simulation
+        // substep observes its own noise state rather than the last substep's state.
+        let mut data = Vec::with_capacity(32 + self.channels.len() * 32);
+        data.extend_from_slice(bytemuck::cast_slice(&[0.0_f32, 0.0, 0.0, timestep]));
+        data.extend_from_slice(bytemuck::bytes_of(&self.uniforms));
+        data.extend_from_slice(bytemuck::cast_slice(&self.channels));
+        let upload = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("upload:noise_step"),
+            contents: &data,
+            usage: wgpu::BufferUsages::COPY_SRC,
+        });
+        encoder.copy_buffer_to_buffer(&upload, 0, &self.push_constants_buffer, 0, 16);
+        encoder.copy_buffer_to_buffer(&upload, 16, &self.uniform_buffer, 0, 16);
+        encoder.copy_buffer_to_buffer(&upload, 32, &self.channel_buffer, 0, data.len() as u64 - 32);
     }
 
     pub fn generate<'cpass>(&'cpass self, cpass: &mut wgpu::ComputePass<'cpass>) {
         let workgroup = (
-            self.texture.size().width / 16,
-            self.texture.size().height / 16,
+            self.texture.size().width.div_ceil(16),
+            self.texture.size().height.div_ceil(16),
             1,
         );
         cpass.set_pipeline(&self.generate_noise_pipeline);
@@ -101,8 +165,8 @@ impl NoiseGenerator {
         target_texture_size: wgpu::Extent3d,
     ) {
         let workgroup = (
-            target_texture_size.width / 16,
-            target_texture_size.height / 16,
+            target_texture_size.width.div_ceil(16),
+            target_texture_size.height.div_ceil(16),
             1,
         );
         cpass.set_pipeline(&self.inject_noise_pipeline);
@@ -144,15 +208,31 @@ impl NoiseGeneratorBuilder {
         self
     }
 
-    pub fn build(self, device: &wgpu::Device, _queue: &wgpu::Queue) -> NoiseGenerator {
+    pub fn build(self, device: &wgpu::Device, queue: &wgpu::Queue) -> NoiseGenerator {
+        self.build_with_resources(
+            device,
+            queue,
+            &Arc::new(crate::SharedResources::new(device)),
+        )
+    }
+
+    pub(crate) fn build_with_resources(
+        self,
+        device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        resources: &Arc<crate::SharedResources>,
+    ) -> NoiseGenerator {
         log::info!("🎛 Generating noise");
 
         let uniforms = NoiseUniforms::new(&self.settings);
-        let channels = self
+        let mut channels = self
             .channels
             .iter()
             .map(|channel| NoiseChannel::new(self.scaling_ratio, channel))
             .collect::<Vec<_>>();
+        if channels.is_empty() {
+            channels.push(bytemuck::Zeroable::zeroed());
+        }
 
         let (width, height) = (
             self.size * self.scaling_ratio.rounded_x(),
@@ -282,7 +362,7 @@ impl NoiseGeneratorBuilder {
             push_constant_ranges: &[],
         });
 
-        let generate_noise_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let generate_noise_shader = resources.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader:generate_noise"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
                 "../../shader/generate_noise.comp.wgsl"
@@ -290,7 +370,7 @@ impl NoiseGeneratorBuilder {
         });
 
         let generate_noise_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            resources.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("pipeline:generate_noise"),
                 layout: Some(&pipeline_layout),
                 module: &generate_noise_shader,
@@ -413,7 +493,7 @@ impl NoiseGeneratorBuilder {
                 push_constant_ranges: &[],
             });
 
-        let inject_noise_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let inject_noise_shader = resources.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Inject noise shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
                 "../../shader/inject_noise.comp.wgsl"
@@ -421,7 +501,7 @@ impl NoiseGeneratorBuilder {
         });
 
         let inject_noise_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            resources.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("Inject noise"),
                 layout: Some(&inject_noise_pipeline_layout),
                 module: &inject_noise_shader,
@@ -431,6 +511,7 @@ impl NoiseGeneratorBuilder {
             });
 
         NoiseGenerator {
+            linear_sampler,
             elapsed_time: 0.0,
 
             uniforms,
@@ -467,7 +548,12 @@ fn create_texture(
         view_formats: &[],
         usage: wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::STORAGE_BINDING
-            | wgpu::TextureUsages::COPY_DST,
+            | wgpu::TextureUsages::COPY_DST
+            | if cfg!(test) {
+                wgpu::TextureUsages::COPY_SRC
+            } else {
+                wgpu::TextureUsages::empty()
+            },
     });
 
     let texture_view = texture.create_view(&wgpu::TextureViewDescriptor {
@@ -541,5 +627,30 @@ impl NoiseUniforms {
             multiplier: settings.noise_multiplier,
             _padding: [0, 0, 0],
         }
+    }
+}
+
+#[cfg(test)]
+impl NoiseGenerator {
+    pub(crate) fn assert_generated(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        expect_noise: bool,
+    ) {
+        let data = crate::test_support::read_texture(device, queue, &self.texture, 8);
+        let nonzero = data
+            .chunks_exact(4)
+            .any(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()).abs() > 1e-6);
+        assert_eq!(
+            nonzero, expect_noise,
+            "noise generation must target the current resized texture"
+        );
+    }
+
+    pub(crate) fn assert_resource_sizes(&self, fluid_size: wgpu::Extent3d) {
+        assert_eq!(self.texture.size().width, fluid_size.width * 2);
+        assert_eq!(self.texture.size().height, fluid_size.height * 2);
+        assert_eq!(self.channel_buffer.size(), self.channels.len() as u64 * 32);
     }
 }

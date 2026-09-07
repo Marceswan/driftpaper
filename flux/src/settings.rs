@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub mode: Mode,
@@ -97,10 +97,22 @@ impl Default for PressureMode {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub enum ColorMode {
     Preset(ColorPreset),
     ImageFile(std::path::PathBuf),
+    /// Six RGBA palette entries, retained across resizing and settings updates.
+    Custom([f32; 24]),
+}
+
+impl ColorMode {
+    pub fn to_color_wheel(&self) -> Option<[f32; 24]> {
+        match self {
+            Self::Preset(preset) => preset.to_color_wheel(),
+            Self::Custom(colors) => Some(*colors),
+            Self::ImageFile(_) => None,
+        }
+    }
 }
 
 impl Default for ColorMode {
@@ -113,7 +125,7 @@ impl From<ColorMode> for u32 {
     fn from(val: ColorMode) -> Self {
         match val {
             ColorMode::Preset(ColorPreset::Original) => 0,
-            ColorMode::Preset(_) => 1,
+            ColorMode::Preset(_) | ColorMode::Custom(_) => 1,
             ColorMode::ImageFile(_) => 2,
         }
     }

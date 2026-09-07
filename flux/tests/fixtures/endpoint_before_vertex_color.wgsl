@@ -74,8 +74,8 @@ fn main_vs(
     transformed_point,
     vertex,
     midpoint_vector,
-    vec4<f32>(cap_brightness(top_color.rgb) * uniforms.brightness_scale * 0.3, top_color.a),
-    vec4<f32>(cap_brightness(bottom_color.rgb) * uniforms.brightness_scale * 0.3, bottom_color.a),
+    top_color,
+    bottom_color,
   );
 }
 
@@ -163,5 +163,10 @@ fn main_fs(fs_input: VertexOutput) -> @location(0) vec4<f32> {
   let distance = length(fs_input.f_vertex);
   let smoothEdges = 1.0 - smoothstep(1.0 - fwidth(distance), 1.0, distance);
 
-  return vec4<f32>(color.rgb, color.a * smoothEdges);
+  // Apply brightness capping
+  let capped_color = cap_brightness(color.rgb);
+  // Scale color by brightness_scale (based on line count) to normalize across displays
+  // Base multiplier 0.3 for darker overall look, then scale by line count
+  let scaled_color = capped_color * uniforms.brightness_scale * 0.3;
+  return vec4<f32>(scaled_color, color.a * smoothEdges);
 }

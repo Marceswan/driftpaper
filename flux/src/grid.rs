@@ -46,8 +46,8 @@ impl Grid {
         let aspect_ratio = width / height;
         let grid_spacing = grid_spacing as f32;
 
-        let columns = f32::floor(width / grid_spacing);
-        let rows = f32::floor((height / width) * columns);
+        let columns = f32::floor(width / grid_spacing).max(1.0);
+        let rows = f32::floor((height / width) * columns).max(1.0);
         let grid_spacing_x: f32 = 1.0 / columns;
         let grid_spacing_y: f32 = 1.0 / rows;
 
@@ -78,6 +78,7 @@ impl Grid {
     }
 }
 
+#[cfg(test)]
 fn clamp_logical_size(width: u32, height: u32) -> (u32, u32) {
     let width = width as f32;
     let height = height as f32;
@@ -94,6 +95,12 @@ fn clamp_logical_size(width: u32, height: u32) -> (u32, u32) {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn tiny_windows_have_finite_basepoints() {
+        let grid = Grid::new(1, 1, 15);
+        assert!(grid.basepoints.iter().all(|value| value.is_finite()));
+    }
 
     #[derive(Copy, Clone, PartialEq, Debug)]
     struct LogicalSize {

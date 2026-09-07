@@ -51,7 +51,7 @@ fn main_vs(
   return VertexOutput(
     transformed_point,
     vertex,
-    vec4<f32>(cap_brightness(color.rgb) * uniforms.brightness_scale * 0.3, color.a),
+    color,
     line_offset,
   );
 }
@@ -131,5 +131,10 @@ fn main_fs(fs_input: VertexOutput) -> @location(0) vec4<f32> {
   let x_offset = abs(fs_input.f_vertex.x);
   let smooth_edges = 1.0 - smoothstep(0.5 - fwidth(x_offset), 0.5, x_offset);
 
-  return vec4<f32>(fs_input.f_color.rgb, fs_input.f_color.a * fade * smooth_edges);
+  // Apply brightness capping to reduce eye strain
+  let capped_color = cap_brightness(fs_input.f_color.rgb);
+  // Scale color by brightness_scale (based on line count) to normalize across displays
+  // Base multiplier 0.3 for darker overall look, then scale by line count
+  let scaled_color = capped_color * uniforms.brightness_scale * 0.3;
+  return vec4<f32>(scaled_color, fs_input.f_color.a * fade * smooth_edges);
 }

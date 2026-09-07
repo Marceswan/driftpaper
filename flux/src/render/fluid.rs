@@ -27,7 +27,7 @@ struct FluidUniforms {
 }
 
 impl FluidUniforms {
-    pub fn new(size: &wgpu::Extent3d, settings: &Settings) -> Self {
+    pub fn new(_size: &wgpu::Extent3d, settings: &Settings) -> Self {
         // dx^2 / (rho * dt)
         let center_factor = 1.0 / (settings.viscosity * settings.fluid_timestep);
         let stencil_factor = 1.0 / (4.0 + center_factor);
@@ -46,6 +46,7 @@ impl FluidUniforms {
 }
 
 pub struct Context {
+    resources: Arc<crate::SharedResources>,
     fluid_size: [f32; 2],
     fluid_size_3d: wgpu::Extent3d,
 
@@ -56,15 +57,15 @@ pub struct Context {
     fluid_uniforms: FluidUniforms,
     fluid_uniform_buffer: wgpu::Buffer,
 
-    velocity_textures: [wgpu::Texture; 2],
+    _velocity_textures: [wgpu::Texture; 2],
     velocity_texture_views: [wgpu::TextureView; 2],
-    advection_forward_texture: wgpu::Texture,
+    _advection_forward_texture: wgpu::Texture,
     advection_forward_texture_view: wgpu::TextureView,
-    advection_reverse_texture: wgpu::Texture,
-    advection_reverse_texture_view: wgpu::TextureView,
-    divergence_texture: wgpu::Texture,
+    _advection_reverse_texture: wgpu::Texture,
+    _advection_reverse_texture_view: wgpu::TextureView,
+    _divergence_texture: wgpu::Texture,
     divergence_texture_view: wgpu::TextureView,
-    pressure_textures: [wgpu::Texture; 2],
+    _pressure_textures: [wgpu::Texture; 2],
     pressure_texture_views: [wgpu::TextureView; 2],
 
     velocity_bind_groups: [wgpu::BindGroup; 2],
@@ -83,6 +84,9 @@ pub struct Context {
     diffusion_pipeline: wgpu::ComputePipeline,
     divergence_pipeline: wgpu::ComputePipeline,
     pressure_pipeline: wgpu::ComputePipeline,
+    clear_pressure_pipeline: wgpu::ComputePipeline,
+    clear_pressure_buffer: wgpu::Buffer,
+    clear_pressure_bind_group: wgpu::BindGroup,
     subtract_gradient_pipeline: wgpu::ComputePipeline,
 
     last_pressure_index: Arc<Mutex<usize>>,
@@ -109,15 +113,28 @@ impl Context {
 
         // Resize the fluid texture if necessary
         if self.fluid_size_3d != size {
-            self.fluid_size = [width as f32, height as f32];
-            self.fluid_size_3d = size;
-            // self.resize_fluid_texture(width, height).unwrap();
+            *self = Self::new_with_resources(
+                device,
+                queue,
+                scaling_ratio,
+                settings,
+                &Arc::clone(&self.resources),
+            );
+            return;
         }
 
         // Update fluid settings needed on the CPU side
         self.diffusion_iterations = settings.diffusion_iterations;
         self.pressure_mode = settings.pressure_mode;
         self.pressure_iterations = settings.pressure_iterations;
+
+        if let settings::PressureMode::ClearWith(value) = settings.pressure_mode {
+            queue.write_buffer(
+                &self.clear_pressure_buffer,
+                0,
+                bytemuck::cast_slice(&[value, 0.0, 0.0, 0.0]),
+            );
+        }
 
         // Update uniforms
         self.fluid_uniforms = FluidUniforms::new(&size, settings);
@@ -133,6 +150,22 @@ impl Context {
         queue: &wgpu::Queue,
         scaling_ratio: grid::ScalingRatio,
         settings: &Arc<Settings>,
+    ) -> Self {
+        Self::new_with_resources(
+            device,
+            queue,
+            scaling_ratio,
+            settings,
+            &std::sync::Arc::new(crate::SharedResources::new(device)),
+        )
+    }
+
+    pub(crate) fn new_with_resources(
+        device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        scaling_ratio: grid::ScalingRatio,
+        settings: &Arc<Settings>,
+        resources: &std::sync::Arc<crate::SharedResources>,
     ) -> Self {
         let (width, height) = (
             scaling_ratio.rounded_x() * settings.fluid_size,
@@ -166,7 +199,12 @@ impl Context {
                 view_formats: &[],
                 usage: wgpu::TextureUsages::TEXTURE_BINDING
                     | wgpu::TextureUsages::STORAGE_BINDING
-                    | wgpu::TextureUsages::COPY_DST,
+                    | wgpu::TextureUsages::COPY_DST
+                    | if cfg!(test) {
+                        wgpu::TextureUsages::COPY_SRC
+                    } else {
+                        wgpu::TextureUsages::empty()
+                    },
             }),
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("texture:velocity_1"),
@@ -178,7 +216,12 @@ impl Context {
                 view_formats: &[],
                 usage: wgpu::TextureUsages::TEXTURE_BINDING
                     | wgpu::TextureUsages::STORAGE_BINDING
-                    | wgpu::TextureUsages::COPY_DST,
+                    | wgpu::TextureUsages::COPY_DST
+                    | if cfg!(test) {
+                        wgpu::TextureUsages::COPY_SRC
+                    } else {
+                        wgpu::TextureUsages::empty()
+                    },
             }),
         ];
 
@@ -192,7 +235,12 @@ impl Context {
             view_formats: &[],
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::COPY_DST,
+                | wgpu::TextureUsages::COPY_DST
+                | if cfg!(test) {
+                    wgpu::TextureUsages::COPY_SRC
+                } else {
+                    wgpu::TextureUsages::empty()
+                },
         });
 
         let advection_reverse_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -205,7 +253,12 @@ impl Context {
             view_formats: &[],
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::COPY_DST,
+                | wgpu::TextureUsages::COPY_DST
+                | if cfg!(test) {
+                    wgpu::TextureUsages::COPY_SRC
+                } else {
+                    wgpu::TextureUsages::empty()
+                },
         });
 
         let divergence_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -218,7 +271,12 @@ impl Context {
             view_formats: &[],
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::COPY_DST,
+                | wgpu::TextureUsages::COPY_DST
+                | if cfg!(test) {
+                    wgpu::TextureUsages::COPY_SRC
+                } else {
+                    wgpu::TextureUsages::empty()
+                },
         });
 
         let pressure_textures = [
@@ -232,7 +290,12 @@ impl Context {
                 view_formats: &[],
                 usage: wgpu::TextureUsages::TEXTURE_BINDING
                     | wgpu::TextureUsages::STORAGE_BINDING
-                    | wgpu::TextureUsages::COPY_DST,
+                    | wgpu::TextureUsages::COPY_DST
+                    | if cfg!(test) {
+                        wgpu::TextureUsages::COPY_SRC
+                    } else {
+                        wgpu::TextureUsages::empty()
+                    },
             }),
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("texture:pressure_1"),
@@ -244,7 +307,12 @@ impl Context {
                 view_formats: &[],
                 usage: wgpu::TextureUsages::STORAGE_BINDING
                     | wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_DST,
+                    | wgpu::TextureUsages::COPY_DST
+                    | if cfg!(test) {
+                        wgpu::TextureUsages::COPY_SRC
+                    } else {
+                        wgpu::TextureUsages::empty()
+                    },
             }),
         ];
 
@@ -535,24 +603,25 @@ impl Context {
                 push_constant_ranges: &[],
             });
 
-        let advection_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let advection_shader = resources.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader:advection"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
                 "../../shader/advect.comp.wgsl"
             ))),
         });
 
-        let advection_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Advection"),
-            layout: Some(&advection_pipeline_layout),
-            module: &advection_shader,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-            // TODO: use pipeline constants for direction once #5500 lands
-            // https://github.com/gfx-rs/wgpu/pull/5500
-            // constants: HashMap::from([("direction", 1)]),
-        });
+        let advection_pipeline =
+            resources.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Advection"),
+                layout: Some(&advection_pipeline_layout),
+                module: &advection_shader,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+                // TODO: use pipeline constants for direction once #5500 lands
+                // https://github.com/gfx-rs/wgpu/pull/5500
+                // constants: HashMap::from([("direction", 1)]),
+            });
 
         let adjust_advection_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -609,15 +678,16 @@ impl Context {
                 push_constant_ranges: &[],
             });
 
-        let adjust_advection_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("shader:adjust_advection"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../../shader/adjust_advection.comp.wgsl"
-            ))),
-        });
+        let adjust_advection_shader =
+            resources.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("shader:adjust_advection"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                    "../../shader/adjust_advection.comp.wgsl"
+                ))),
+            });
 
         let adjust_advection_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            resources.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("pipeline:adjust_advection"),
                 layout: Some(&adjust_advection_pipeline_layout),
                 module: &adjust_advection_shader,
@@ -626,7 +696,7 @@ impl Context {
                 cache: None,
             });
 
-        let diffusion_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let diffusion_shader = resources.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader:diffusion"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
                 "../../shader/diffuse.comp.wgsl"
@@ -640,14 +710,15 @@ impl Context {
                 push_constant_ranges: &[],
             });
 
-        let diffusion_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Diffusion"),
-            layout: Some(&diffusion_pipeline_layout),
-            module: &diffusion_shader,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+        let diffusion_pipeline =
+            resources.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Diffusion"),
+                layout: Some(&diffusion_pipeline_layout),
+                module: &diffusion_shader,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
 
         let divergence_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -696,7 +767,7 @@ impl Context {
                 push_constant_ranges: &[],
             });
 
-        let divergence_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let divergence_shader = resources.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader:divergence"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
                 "../../shader/divergence.comp.wgsl"
@@ -704,7 +775,7 @@ impl Context {
         });
 
         let divergence_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            resources.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("pipeline:divergence"),
                 layout: Some(&divergence_pipeline_layout),
                 module: &divergence_shader,
@@ -800,7 +871,7 @@ impl Context {
             }),
         ];
 
-        let pressure_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let pressure_shader = resources.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader:pressure"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
                 "../../shader/solve_pressure.comp.wgsl"
@@ -818,21 +889,23 @@ impl Context {
                 push_constant_ranges: &[],
             });
 
-        let pressure_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("pipeline:pressure"),
-            layout: Some(&pressure_pipeline_layout),
-            module: &pressure_shader,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+        let pressure_pipeline =
+            resources.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("pipeline:pressure"),
+                layout: Some(&pressure_pipeline_layout),
+                module: &pressure_shader,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
 
-        let subtract_gradient_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("shader:subtract_gradient"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../../shader/subtract_gradient.comp.wgsl"
-            ))),
-        });
+        let subtract_gradient_shader =
+            resources.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("shader:subtract_gradient"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                    "../../shader/subtract_gradient.comp.wgsl"
+                ))),
+            });
 
         let subtract_gradient_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -846,7 +919,7 @@ impl Context {
             });
 
         let subtract_gradient_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            resources.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("pipeline:subtract_gradient"),
                 layout: Some(&subtract_gradient_pipeline_layout),
                 module: &subtract_gradient_shader,
@@ -855,7 +928,64 @@ impl Context {
                 cache: None,
             });
 
+        let clear_pressure_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("uniform:clear_pressure"),
+            contents: bytemuck::cast_slice(&[
+                match settings.pressure_mode {
+                    settings::PressureMode::ClearWith(value) => value,
+                    _ => 0.0,
+                },
+                0.0,
+                0.0,
+                0.0,
+            ]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let clear_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("layout:clear_pressure"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let clear_pressure_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bind_group:clear_pressure"),
+            layout: &clear_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: clear_pressure_buffer.as_entire_binding(),
+            }],
+        });
+        let clear_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("pipeline_layout:clear_pressure"),
+                bind_group_layouts: &[&clear_layout, &pressure_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let clear_shader = resources.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("shader:clear_pressure"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                "../../shader/clear_pressure.comp.wgsl"
+            ))),
+        });
+        let clear_pressure_pipeline =
+            resources.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("pipeline:clear_pressure"),
+                layout: Some(&clear_pipeline_layout),
+                module: &clear_shader,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
+
         Self {
+            resources: Arc::clone(resources),
             fluid_size: [width as f32, height as f32],
             fluid_size_3d: size,
 
@@ -866,15 +996,15 @@ impl Context {
             fluid_uniforms,
             fluid_uniform_buffer,
 
-            velocity_textures,
+            _velocity_textures: velocity_textures,
             velocity_texture_views,
-            advection_forward_texture,
+            _advection_forward_texture: advection_forward_texture,
             advection_forward_texture_view,
-            advection_reverse_texture,
-            advection_reverse_texture_view,
-            divergence_texture,
+            _advection_reverse_texture: advection_reverse_texture,
+            _advection_reverse_texture_view: advection_reverse_texture_view,
+            _divergence_texture: divergence_texture,
             divergence_texture_view,
-            pressure_textures,
+            _pressure_textures: pressure_textures,
             pressure_texture_views,
 
             velocity_bind_groups,
@@ -893,6 +1023,9 @@ impl Context {
             diffusion_pipeline,
             divergence_pipeline,
             pressure_pipeline,
+            clear_pressure_pipeline,
+            clear_pressure_buffer,
+            clear_pressure_bind_group,
             subtract_gradient_pipeline,
 
             last_pressure_index: Arc::new(Mutex::new(0)),
@@ -973,39 +1106,19 @@ impl Context {
         cpass.dispatch_workgroups(workgroup.0, workgroup.1, workgroup.2);
     }
 
-    pub fn clear_pressure(&self, queue: &wgpu::Queue, pressure: f32) {
-        let (width, height) = (self.fluid_size[0] as u32, self.fluid_size[1] as u32);
-
-        for pressure_texture in self.pressure_textures.iter() {
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: pressure_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                bytemuck::cast_slice(&vec![pressure; (width * height) as usize]),
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(4 * width),
-                    rows_per_image: Some(height),
-                },
-                self.fluid_size_3d,
-            );
-        }
-    }
-
     pub fn solve_pressure<'cpass>(
         &'cpass self,
-        queue: &wgpu::Queue,
+        _queue: &wgpu::Queue,
         cpass: &mut wgpu::ComputePass<'cpass>,
     ) {
-        use settings::PressureMode::*;
-        match self.pressure_mode {
-            ClearWith(pressure) => {
-                self.clear_pressure(queue, pressure);
+        if matches!(self.pressure_mode, settings::PressureMode::ClearWith(_)) {
+            let (x, y, z) = self.get_workgroup_size();
+            cpass.set_pipeline(&self.clear_pressure_pipeline);
+            cpass.set_bind_group(0, &self.clear_pressure_bind_group, &[]);
+            for binding in &self.pressure_bind_groups {
+                cpass.set_bind_group(1, binding, &[]);
+                cpass.dispatch_workgroups(x, y, z);
             }
-            Retain => (),
         }
 
         let mut pressure_index = self.last_pressure_index.lock().unwrap();
@@ -1065,5 +1178,28 @@ impl Context {
         let curr_index = *index;
         *index = 1 - *index;
         &self.velocity_bind_groups[curr_index]
+    }
+}
+
+#[cfg(test)]
+impl Context {
+    pub(crate) fn velocity_bytes(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Vec<u8> {
+        let index = *self.last_velocity_index.lock().unwrap();
+        crate::test_support::read_texture(device, queue, &self._velocity_textures[index], 8)
+    }
+
+    pub(crate) fn assert_resource_sizes(&self) {
+        for texture in self
+            ._velocity_textures
+            .iter()
+            .chain(self._pressure_textures.iter())
+            .chain([
+                &self._advection_forward_texture,
+                &self._advection_reverse_texture,
+                &self._divergence_texture,
+            ])
+        {
+            assert_eq!(texture.size(), self.fluid_size_3d);
+        }
     }
 }

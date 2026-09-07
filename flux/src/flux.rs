@@ -1,3 +1,4 @@
+use crate::SharedResources;
 use crate::{grid, render, rng, settings};
 use settings::Settings;
 
@@ -9,6 +10,8 @@ const MAX_ELAPSED_TIME: f32 = 1000.0;
 const MAX_FRAME_TIME: f32 = 1.0 / 10.0;
 
 pub struct Flux {
+    resources: Arc<SharedResources>,
+    swapchain_format: wgpu::TextureFormat,
     settings: Arc<Settings>,
     logical_size: wgpu::Extent3d,
     physical_size: wgpu::Extent3d,
@@ -37,12 +40,58 @@ impl Flux {
     }
 
     pub fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, settings: &Arc<Settings>) {
+        if *self.settings == **settings {
+            return;
+        }
+        if settings.grid_spacing == 0
+            || settings.fluid_size == 0
+            || !settings.fluid_timestep.is_finite()
+            || settings.fluid_timestep <= 0.0
+        {
+            log::warn!("Ignoring invalid simulation dimensions or timestep");
+            return;
+        }
+        let resize_grid = self.settings.grid_spacing != settings.grid_spacing;
         self.settings = Arc::clone(settings);
+        if resize_grid {
+            self.resize(
+                device,
+                queue,
+                self.logical_size.width,
+                self.logical_size.height,
+                self.physical_size.width,
+                self.physical_size.height,
+            );
+        } else {
+            self.lines
+                .update(device, queue, self.logical_size, &self.grid, &self.settings);
+            self.resize_simulation(device, queue);
+        }
+        self.noise_generator.update(device, &self.settings);
+    }
+
+    fn resize_simulation(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let old_size = self.fluid.get_fluid_size();
         self.fluid
             .update(device, queue, self.grid.scaling_ratio, &self.settings);
-        self.noise_generator.update(&self.settings);
-        self.lines
-            .update(device, queue, self.logical_size, &self.grid, &self.settings);
+        self.noise_generator.resize(
+            device,
+            2 * self.settings.fluid_size,
+            self.grid.scaling_ratio,
+        );
+        if old_size != self.fluid.get_fluid_size() {
+            self.debug_texture = render::texture::Context::new_with_resources(
+                device,
+                self.swapchain_format,
+                &[
+                    ("fluid", self.fluid.get_velocity_texture_view()),
+                    ("noise", self.noise_generator.get_noise_texture_view()),
+                    ("pressure", self.fluid.get_pressure_texture_view()),
+                    ("divergence", self.fluid.get_divergence_texture_view()),
+                ],
+                &self.resources,
+            );
+        }
     }
 
     pub fn sample_colors_from_image(
@@ -75,6 +124,48 @@ impl Flux {
         physical_height: u32,
         settings: &Arc<Settings>,
     ) -> Result<Flux, String> {
+        Self::new_with_resources(
+            device,
+            queue,
+            swapchain_format,
+            logical_width,
+            logical_height,
+            physical_width,
+            physical_height,
+            settings,
+            &Arc::new(SharedResources::new(device)),
+        )
+    }
+
+    pub fn new_with_resources(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        swapchain_format: wgpu::TextureFormat,
+        logical_width: u32,
+        logical_height: u32,
+        physical_width: u32,
+        physical_height: u32,
+        settings: &Arc<Settings>,
+        resources: &Arc<SharedResources>,
+    ) -> Result<Flux, String> {
+        if !resources.belongs_to(device) {
+            return Err("SharedResources belongs to a different GPU device".into());
+        }
+        if logical_width == 0
+            || logical_height == 0
+            || physical_width == 0
+            || physical_height == 0
+            || settings.grid_spacing == 0
+            || settings.fluid_size == 0
+            || !settings.fluid_timestep.is_finite()
+            || settings.fluid_timestep <= 0.0
+        {
+            return Err(
+                "Dimensions, grid spacing, fluid size and timestep must be positive and finite"
+                    .into(),
+            );
+        }
+
         log::info!("✨ Initialising Flux");
 
         rng::init_from_seed(&settings.seed);
@@ -95,15 +186,22 @@ impl Flux {
 
         let grid = grid::Grid::new(logical_width, logical_height, settings.grid_spacing);
 
-        let fluid = render::fluid::Context::new(device, queue, grid.scaling_ratio, settings);
+        let fluid = render::fluid::Context::new_with_resources(
+            device,
+            queue,
+            grid.scaling_ratio,
+            settings,
+            resources,
+        );
 
-        let lines = render::lines::Context::new(
+        let lines = render::lines::Context::new_with_resources(
             device,
             queue,
             swapchain_format,
             logical_size,
             &grid,
             settings,
+            resources,
         );
 
         let mut noise_generator_builder = render::noise::NoiseGeneratorBuilder::new(
@@ -114,9 +212,10 @@ impl Flux {
         settings.noise_channels.iter().for_each(|channel| {
             noise_generator_builder.add_channel(channel);
         });
-        let noise_generator = noise_generator_builder.build(device, queue);
+        let noise_generator =
+            noise_generator_builder.build_with_resources(device, queue, resources);
 
-        let debug_texture = render::texture::Context::new(
+        let debug_texture = render::texture::Context::new_with_resources(
             device,
             swapchain_format,
             &[
@@ -125,9 +224,12 @@ impl Flux {
                 ("pressure", fluid.get_pressure_texture_view()),
                 ("divergence", fluid.get_divergence_texture_view()),
             ],
+            resources,
         );
 
         Ok(Flux {
+            resources: Arc::clone(resources),
+            swapchain_format,
             settings: Arc::clone(settings),
             logical_size,
             physical_size,
@@ -155,6 +257,27 @@ impl Flux {
         physical_width: u32,
         physical_height: u32,
     ) {
+        if logical_width == 0 || logical_height == 0 || physical_width == 0 || physical_height == 0
+        {
+            return;
+        }
+        let columns = (logical_width / self.settings.grid_spacing).max(1) + 1;
+        let rows = ((logical_height as f32 / logical_width as f32) * (columns - 1) as f32)
+            .floor()
+            .max(1.0) as u32
+            + 1;
+        if self.logical_size.width == logical_width
+            && self.logical_size.height == logical_height
+            && self.grid.columns == columns
+            && self.grid.rows == rows
+        {
+            self.physical_size.width = physical_width;
+            self.physical_size.height = physical_height;
+            self.lines
+                .update(device, queue, self.logical_size, &self.grid, &self.settings);
+            self.resize_simulation(device, queue);
+            return;
+        }
         let grid = grid::Grid::new(logical_width, logical_height, self.settings.grid_spacing);
 
         // TODO: fetch line state from GPU and resample for new grid
@@ -176,12 +299,7 @@ impl Flux {
         self.logical_size = logical_size;
         self.physical_size = physical_size;
 
-        // self.fluid.resize(device, self.grid.scaling_ratio);
-        self.noise_generator.resize(
-            device,
-            2 * self.settings.fluid_size,
-            self.grid.scaling_ratio,
-        );
+        self.resize_simulation(device, queue);
     }
 
     pub fn animate(
@@ -207,7 +325,7 @@ impl Flux {
         // The delta time in seconds
         let timestep = f32::min(
             MAX_FRAME_TIME,
-            0.001 * (timestamp - self.last_timestamp) as f32,
+            (0.001 * (timestamp - self.last_timestamp) as f32).max(0.0),
         );
 
         self.last_timestamp = timestamp;
@@ -222,7 +340,7 @@ impl Flux {
 
         while self.fluid_frame_time >= self.settings.fluid_timestep {
             self.noise_generator
-                .update_buffers(queue, self.settings.fluid_timestep);
+                .update_buffers(device, encoder, self.settings.fluid_timestep);
 
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("flux::compute"),
@@ -342,3 +460,195 @@ impl Flux {
 //         }
 //     }
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gpu_resize_palette_and_shared_programs() {
+        let Some((device, queue)) = crate::test_support::gpu() else {
+            return;
+        };
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let resources = Arc::new(SharedResources::new(&device));
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let mut settings = Arc::new(Settings {
+            seed: Some("resize-regression".into()),
+            fluid_size: 16,
+            grid_spacing: 32,
+            color_mode: settings::ColorMode::Custom(settings::COLOR_SCHEME_PLASMA),
+            ..Default::default()
+        });
+        let mut flux = Flux::new_with_resources(
+            &device, &queue, format, 512, 512, 64, 64, &settings, &resources,
+        )
+        .unwrap();
+        let counts = resources.program_counts();
+        let mut other = Flux::new_with_resources(
+            &device, &queue, format, 512, 512, 64, 64, &settings, &resources,
+        )
+        .unwrap();
+        assert_eq!(
+            counts,
+            resources.program_counts(),
+            "second simulation must reuse compiled programs"
+        );
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("regression render target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = target.create_view(&Default::default());
+        let mut timestamp = 0.0;
+        for (width, height, fluid_size, channel_count) in [
+            (8192, 512, 16, 3),
+            (512, 8192, 16, 1),
+            (512, 8192, 32, 4),
+            (512, 512, 16, 0),
+        ] {
+            Arc::make_mut(&mut settings).fluid_size = fluid_size;
+            Arc::make_mut(&mut settings).noise_channels = vec![
+                settings::Noise {
+                    scale: 2.8,
+                    multiplier: 1.0,
+                    offset_increment: 0.01
+                };
+                channel_count
+            ];
+            flux.update(&device, &queue, &settings);
+            flux.resize(&device, &queue, width, height, 64, 64);
+            flux.lines.assert_color_mode(1);
+            flux.fluid.assert_resource_sizes();
+            flux.noise_generator
+                .assert_resource_sizes(flux.fluid.get_fluid_size());
+            assert_eq!(
+                counts,
+                resources.program_counts(),
+                "resize must reuse compiled programs"
+            );
+            for mode in [
+                settings::Mode::Normal,
+                settings::Mode::DebugNoise,
+                settings::Mode::DebugFluid,
+                settings::Mode::DebugPressure,
+                settings::Mode::DebugDivergence,
+            ] {
+                Arc::make_mut(&mut settings).mode = mode;
+                flux.update(&device, &queue, &settings);
+                timestamp += 50.0;
+                let mut encoder = device.create_command_encoder(&Default::default());
+                flux.animate(&device, &queue, &mut encoder, &view, None, timestamp);
+                other.animate(&device, &queue, &mut encoder, &view, None, timestamp);
+                queue.submit([encoder.finish()]);
+            }
+            flux.noise_generator
+                .assert_generated(&device, &queue, channel_count != 0);
+        }
+        Arc::make_mut(&mut settings).grid_spacing = 64;
+        flux.update(&device, &queue, &settings);
+        assert_eq!(flux.grid.columns, 9, "density changes must resize the grid");
+        let prior_size = flux.logical_size;
+        flux.resize(&device, &queue, 0, 0, 0, 0);
+        assert_eq!(
+            flux.logical_size, prior_size,
+            "zero-sized windows suspend resizing"
+        );
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        if let Some(error) = pollster::block_on(device.pop_error_scope()) {
+            panic!("GPU validation: {error}");
+        }
+    }
+
+    #[test]
+    fn gpu_batched_substeps_match_separate_submissions() {
+        let Some((device, queue)) = crate::test_support::gpu() else {
+            return;
+        };
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let resources = Arc::new(SharedResources::new(&device));
+        let settings = Arc::new(Settings {
+            seed: Some("substep-regression".into()),
+            fluid_size: 16,
+            grid_spacing: 64,
+            // Exact binary time increments keep accumulation identical.
+            fluid_timestep: 1.0 / 64.0,
+            ..Default::default()
+        });
+        let mut batched = Flux::new_with_resources(
+            &device,
+            &queue,
+            wgpu::TextureFormat::Rgba8Unorm,
+            256,
+            256,
+            64,
+            64,
+            &settings,
+            &resources,
+        )
+        .unwrap();
+        let mut separate = Flux::new_with_resources(
+            &device,
+            &queue,
+            wgpu::TextureFormat::Rgba8Unorm,
+            256,
+            256,
+            64,
+            64,
+            &settings,
+            &resources,
+        )
+        .unwrap();
+        let mut encoder = device.create_command_encoder(&Default::default());
+        batched.compute(&device, &queue, &mut encoder, 46.875);
+        queue.submit([encoder.finish()]);
+        for timestamp in [15.625, 31.25, 46.875] {
+            let mut encoder = device.create_command_encoder(&Default::default());
+            separate.compute(&device, &queue, &mut encoder, timestamp);
+            queue.submit([encoder.finish()]);
+        }
+        let batched = batched.fluid.velocity_bytes(&device, &queue);
+        let separate = separate.fluid.velocity_bytes(&device, &queue);
+        let values = |bytes: Vec<u8>| {
+            bytes
+                .chunks_exact(4)
+                .map(|v| f32::from_ne_bytes(v.try_into().unwrap()))
+                .collect::<Vec<_>>()
+        };
+        let batched = values(batched);
+        let separate = values(separate);
+        assert!(
+            batched.iter().any(|value| value.abs() > 1e-6),
+            "fluid must contain noise"
+        );
+        for (a, b) in batched.iter().zip(&separate) {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "batched simulation diverged: {a} vs {b}"
+            );
+        }
+        if let Some(error) = pollster::block_on(device.pop_error_scope()) {
+            panic!("GPU validation: {error}");
+        }
+    }
+
+    #[test]
+    fn custom_palette_round_trips_and_selects_palette_shader() {
+        let mode = settings::ColorMode::Custom(settings::COLOR_SCHEME_POOLSIDE);
+        assert_eq!(u32::from(mode.clone()), 1);
+        let json = serde_json::to_string(&mode).unwrap();
+        assert_eq!(
+            serde_json::from_str::<settings::ColorMode>(&json).unwrap(),
+            mode
+        );
+    }
+}

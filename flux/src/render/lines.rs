@@ -48,7 +48,12 @@ impl LineUniforms {
         // Use linear ratio (not sqrt) for more aggressive darkening on high-line-count displays
         // Apply user brightness multiplier
         let brightness_scale = line_ratio.min(1.0) * settings.brightness_multiplier;
-        log::info!("Display brightness_scale: {} (line_count: {}, user_multiplier: {})", brightness_scale, grid.line_count, settings.brightness_multiplier);
+        log::info!(
+            "Display brightness_scale: {} (line_count: {}, user_multiplier: {})",
+            brightness_scale,
+            grid.line_count,
+            settings.brightness_multiplier
+        );
 
         Self {
             aspect: grid.aspect_ratio,
@@ -138,12 +143,13 @@ pub struct Context {
     linear_sampler: wgpu::Sampler,
     uniform_bind_group_layout: wgpu::BindGroupLayout,
     uniform_bind_group: wgpu::BindGroup,
-    view_uniform_bind_group_layout: wgpu::BindGroupLayout,
+    _view_uniform_bind_group_layout: wgpu::BindGroupLayout,
     view_uniform_bind_group: wgpu::BindGroup,
     lines_bind_group_layout: wgpu::BindGroupLayout,
     line_bind_groups: Vec<wgpu::BindGroup>,
 
     pub color_mode: u32,
+    settings_color_mode: ColorMode,
     color_texture_sampler: wgpu::Sampler,
     color_texture_view: wgpu::TextureView,
     color_buffer: wgpu::Buffer,
@@ -158,7 +164,7 @@ pub struct Context {
 impl Context {
     pub fn update(
         &mut self,
-        device: &wgpu::Device,
+        _device: &wgpu::Device,
         queue: &wgpu::Queue,
         screen_size: wgpu::Extent3d,
         grid: &Grid,
@@ -173,21 +179,15 @@ impl Context {
             new_line_uniforms
         };
 
-        if let ColorMode::Preset(preset) = settings.color_mode {
-            if let Some(color_wheel) = preset.to_color_wheel() {
-                self.color_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("buffer:color"),
-                    size: 4 * (color_wheel.len() as u64),
-                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-                    mapped_at_creation: false,
-                });
-
-                queue.write_buffer(&self.color_buffer, 0, bytemuck::cast_slice(&[color_wheel]));
-
-                self.color_mode = 1;
-                self.update_color_bindings(device, queue, None, None);
+        if self.settings_color_mode != settings.color_mode {
+            if let Some(color_wheel) = settings.color_mode.to_color_wheel() {
+                queue.write_buffer(&self.color_buffer, 0, bytemuck::cast_slice(&color_wheel));
             }
+            self.settings_color_mode = settings.color_mode.clone();
+            self.color_mode = settings.color_mode.clone().into();
         }
+        // Image sampling through the public texture API also survives resize.
+        self.line_uniforms.color_mode = self.color_mode;
 
         queue.write_buffer(
             &self.line_uniform_buffer,
@@ -369,6 +369,26 @@ impl Context {
         screen_size: wgpu::Extent3d,
         grid: &Grid,
         settings: &Settings,
+    ) -> Self {
+        Self::new_with_resources(
+            device,
+            queue,
+            swapchain_format,
+            screen_size,
+            grid,
+            settings,
+            &std::sync::Arc::new(crate::SharedResources::new(device)),
+        )
+    }
+
+    pub(crate) fn new_with_resources(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        swapchain_format: wgpu::TextureFormat,
+        screen_size: wgpu::Extent3d,
+        grid: &Grid,
+        settings: &Settings,
+        resources: &std::sync::Arc<crate::SharedResources>,
     ) -> Self {
         let line_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("buffer:vertices"),
@@ -612,10 +632,14 @@ impl Context {
 
         let color_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("buffer:color"),
-            size: 4 * 4,
+            size: 4 * 24,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
+
+        if let Some(color_wheel) = settings.color_mode.to_color_wheel() {
+            queue.write_buffer(&color_buffer, 0, bytemuck::cast_slice(&color_wheel));
+        }
 
         let color_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -704,7 +728,7 @@ impl Context {
                 push_constant_ranges: &[],
             });
 
-        let place_lines_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let place_lines_shader = resources.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader:place_lines"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
                 "../../shader/place_lines.comp.wgsl"
@@ -712,7 +736,7 @@ impl Context {
         });
 
         let place_lines_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            resources.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("pipeline:place_lines"),
                 layout: Some(&place_lines_pipeline_layout),
                 module: &place_lines_shader,
@@ -728,7 +752,7 @@ impl Context {
                 push_constant_ranges: &[],
             });
 
-        let draw_line_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let draw_line_shader = resources.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader:draw_line"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../../shader/line.wgsl"))),
         });
@@ -769,27 +793,28 @@ impl Context {
             write_mask: wgpu::ColorWrites::ALL,
         })];
 
-        let draw_line_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("pipeline:draw_line"),
-            layout: Some(&draw_line_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &draw_line_shader,
-                entry_point: Some("main_vs"),
-                buffers: &vertex_buffer_layouts,
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &draw_line_shader,
-                entry_point: Some("main_fs"),
-                targets: &color_targets,
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
+        let draw_line_pipeline =
+            resources.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("pipeline:draw_line"),
+                layout: Some(&draw_line_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &draw_line_shader,
+                    entry_point: Some("main_vs"),
+                    buffers: &vertex_buffer_layouts,
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &draw_line_shader,
+                    entry_point: Some("main_fs"),
+                    targets: &color_targets,
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            });
 
         let draw_endpoint_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -798,7 +823,7 @@ impl Context {
                 push_constant_ranges: &[],
             });
 
-        let draw_endpoint_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let draw_endpoint_shader = resources.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader:draw_endpoint"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
                 "../../shader/endpoint.wgsl"
@@ -807,7 +832,7 @@ impl Context {
 
         // TODO: reuse draw_line layout
         let draw_endpoint_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            resources.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("pipeline:draw_endpoint"),
                 layout: Some(&draw_endpoint_pipeline_layout),
                 vertex: wgpu::VertexState {
@@ -848,12 +873,13 @@ impl Context {
             color_texture_sampler,
             uniform_bind_group_layout,
             uniform_bind_group,
-            view_uniform_bind_group_layout,
+            _view_uniform_bind_group_layout: view_uniform_bind_group_layout,
             view_uniform_bind_group,
             lines_bind_group_layout,
             line_bind_groups,
 
             color_mode: line_uniforms.color_mode,
+            settings_color_mode: settings.color_mode.clone(),
             color_texture_view,
             color_buffer,
             color_bind_group_layout,
@@ -931,3 +957,182 @@ pub static ENDPOINT_VERTICES: [f32; 12] = [
     -1.0,  1.0,
      1.0,  1.0,
 ];
+
+#[cfg(test)]
+impl Context {
+    pub(crate) fn assert_color_mode(&self, expected: u32) {
+        assert_eq!(self.color_mode, expected);
+        assert_eq!(
+            self.line_uniforms.color_mode, expected,
+            "GPU uniform must retain the selected color mode"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reference_pipeline(
+        device: &wgpu::Device,
+        lines: &Context,
+        source: &'static str,
+    ) -> wgpu::RenderPipeline {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("pre-optimization reference shader"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(source)),
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[
+                &lines.uniform_bind_group_layout,
+                &lines._view_uniform_bind_group_layout,
+            ],
+            push_constant_ranges: &[],
+        });
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("pre-optimization reference pipeline"), layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader, entry_point: Some("main_vs"), compilation_options: Default::default(),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<Line>() as u64, step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4, 3 => Float32x3, 4 => Float32],
+                    },
+                    wgpu::VertexBufferLayout { array_stride: 8, step_mode: wgpu::VertexStepMode::Instance, attributes: &wgpu::vertex_attr_array![5 => Float32x2] },
+                    wgpu::VertexBufferLayout { array_stride: 8, step_mode: wgpu::VertexStepMode::Vertex, attributes: &wgpu::vertex_attr_array![6 => Float32x2] },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader, entry_point: Some("main_fs"), compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::SrcAlpha, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
+                        alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
+                    }), write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: Default::default(), depth_stencil: None, multisample: Default::default(), multiview: None, cache: None,
+        })
+    }
+
+    fn render_pixels(device: &wgpu::Device, queue: &wgpu::Queue, lines: &Context) -> Vec<u8> {
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("shader comparison target"),
+            size: wgpu::Extent3d {
+                width: 256,
+                height: 256,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = target.create_view(&Default::default());
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            lines.draw_lines(&mut pass);
+            lines.draw_endpoints(&mut pass);
+        }
+        queue.submit([encoder.finish()]);
+        crate::test_support::read_texture(device, queue, &target, 4)
+    }
+
+    #[test]
+    fn gpu_vertex_colors_preserve_fragment_reference_pixels() {
+        let Some((device, queue)) = crate::test_support::gpu() else {
+            return;
+        };
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let grid = Grid::new(256, 256, 64);
+        let settings = Settings {
+            line_width: 24.0,
+            view_scale: 0.8,
+            ..Default::default()
+        };
+        let mut lines = Context::new(
+            &device,
+            &queue,
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu::Extent3d {
+                width: 256,
+                height: 256,
+                depth_or_array_layers: 1,
+            },
+            &grid,
+            &settings,
+        );
+        // Saturated/dim/grayscale colors, multiple opacities and directions cover
+        // both endpoint halves, fades, antialiasing and overlapping primitives.
+        let palette = [
+            [1.0, 0.2, 0.0],
+            [0.1, 0.05, 0.2],
+            [0.8, 0.8, 0.8],
+            [0.0, 0.8, 1.0],
+            [0.2, 1.0, 0.0],
+        ];
+        let state: Vec<_> = (0..grid.line_count)
+            .map(|i| {
+                let color = palette[i as usize % palette.len()];
+                Line {
+                    endpoint: [if i % 2 == 0 { 0.15 } else { -0.15 }, 0.1],
+                    velocity: [0.0; 2],
+                    color: [color[0], color[1], color[2], (i % 5) as f32 * 0.25],
+                    color_velocity: [0.0; 3],
+                    width: 1.0,
+                }
+            })
+            .collect();
+        queue.write_buffer(&lines.line_buffers[0], 0, bytemuck::cast_slice(&state));
+        let optimized = render_pixels(&device, &queue, &lines);
+        lines.draw_line_pipeline = reference_pipeline(
+            &device,
+            &lines,
+            include_str!("../../tests/fixtures/line_before_vertex_color.wgsl"),
+        );
+        lines.draw_endpoint_pipeline = reference_pipeline(
+            &device,
+            &lines,
+            include_str!("../../tests/fixtures/endpoint_before_vertex_color.wgsl"),
+        );
+        let reference = render_pixels(&device, &queue, &lines);
+        assert!(
+            reference
+                .chunks_exact(4)
+                .filter(|pixel| pixel[..3].iter().any(|c| *c > 0))
+                .count()
+                > 500,
+            "comparison must contain visible lines and endpoints"
+        );
+        let max_difference = optimized
+            .iter()
+            .zip(&reference)
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap();
+        assert!(
+            max_difference <= 1,
+            "vertex color optimization changed pixels by {max_difference} levels"
+        );
+        if let Some(error) = pollster::block_on(device.pop_error_scope()) {
+            panic!("GPU validation: {error}");
+        }
+    }
+}

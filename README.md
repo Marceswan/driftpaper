@@ -22,6 +22,7 @@ DriftPaper runs as a menu bar app, rendering a beautiful fluid simulation as you
 | **Line Width** | Thin, Medium, Thick |
 | **View Scale** | Compact, Normal, Wide |
 | **Brightness** | Dim, Normal, Bright, Vivid |
+| **Frame Rate** | 15, 30, 60 FPS (saved across launches) |
 
 Additional options:
 - **Launch at Login** - Automatically start DriftPaper when you log in
@@ -31,8 +32,9 @@ Additional options:
 
 - Renders behind all windows at desktop level
 - Click-through enabled - interact with your desktop normally
-- Multi-display support - one window per display
-- Low power mode - optimized for battery life
+- Multi-display support - one window per display, with live monitor connect/disconnect handling
+- Shared GPU devices and pipelines across compatible displays
+- Rendering pauses during display sleep and locked/inactive sessions
 - Settings persist across sessions
 
 ## Installation
@@ -109,9 +111,11 @@ drift --help
 
 Options:
       --windowed     Run in normal window mode (not as wallpaper)
-      --fps <FPS>    Target frames per second (default: 60)
+      --fps <FPS>    Override saved frame rate (1-240; default preference: 30)
   -h, --help         Print help
 ```
+
+On macOS, wallpaper windows ignore mouse input (including right-click) and cannot take keyboard focus, allowing desktop interaction through Finder.
 
 By default, DriftPaper runs as a wallpaper. Use `--windowed` to run in a normal window for testing or preview.
 
@@ -127,3 +131,19 @@ DriftPaper is built on [Flux](https://github.com/sandydoo/flux) by [Sander Melni
 [MIT](LICENSE) © [Sander Melnikov](https://github.com/sandydoo/) (original Flux project)
 
 Desktop app modifications by [Marc Swan](https://github.com/Marceswan/).
+
+## Development checks
+
+```sh
+cargo fmt --all -- --check
+cargo test --locked -p flux -p flux-desktop
+# Require a real or software GPU adapter; never skip GPU validation:
+DRIFTPAPER_REQUIRE_GPU_TESTS=1 cargo test --locked -p flux
+```
+
+The GPU tests cover resize bindings, custom palettes, shared pipelines, simulation
+substep ordering, and pixel comparisons against the original shaders. Release CI
+also checks the packaged macOS executable permissions.
+
+See [validation and performance notes](docs/validation.md) for platform checks and
+profiling instructions.

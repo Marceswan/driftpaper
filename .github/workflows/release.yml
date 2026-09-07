@@ -5,10 +5,19 @@ on:
     branches:
       - main
 
+concurrency:
+  group: driftpaper-release
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+    permissions:
+      contents: read
+
   # Compute next patch version from latest git tag (runs in parallel with builds)
   version:
     runs-on: ubuntu-latest
@@ -44,6 +53,7 @@ jobs:
           echo "tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
 
   build-windows:
+    needs: checks
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,7 +73,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build release
-        run: cargo build --release -p flux-desktop
+        run: cargo build --locked --release -p flux-desktop
 
       - name: Prepare Windows artifact
         run: |
@@ -78,6 +88,7 @@ jobs:
           path: artifact/windows/DriftPaper.exe
 
   build-macos:
+    needs: [checks, version]
     runs-on: macos-latest
     strategy:
       matrix:
@@ -102,7 +113,7 @@ jobs:
             ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Build release
-        run: cargo build --release -p flux-desktop --target ${{ matrix.target }}
+        run: cargo build --locked --release -p flux-desktop --target ${{ matrix.target }}
 
       - name: Prepare macOS app bundle
         run: |
@@ -112,6 +123,8 @@ jobs:
           cp release/DriftPaper.app/Contents/Info.plist artifact/DriftPaper.app/Contents/Info.plist
           cp release/AppIcon.icns artifact/DriftPaper.app/Contents/Resources/AppIcon.icns
           chmod +x artifact/DriftPaper.app/Contents/MacOS/DriftPaper
+          plutil -replace CFBundleShortVersionString -string '${{ needs.version.outputs.version }}' artifact/DriftPaper.app/Contents/Info.plist
+          plutil -replace CFBundleVersion -string '${{ github.run_number }}' artifact/DriftPaper.app/Contents/Info.plist
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -157,11 +170,14 @@ jobs:
         run: |
           hdiutil create -volname "DriftPaper" -srcfolder universal/DriftPaper.app -ov -format UDZO DriftPaper-macOS.dmg
 
+      - name: Package macOS ZIP and verify executable permissions
+        run: bash release/scripts/package-macos.sh universal/DriftPaper.app DriftPaper-macOS.zip
+
       - name: Upload universal macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-universal-build
-          path: universal/DriftPaper.app
+          path: DriftPaper-macOS.zip
 
       - name: Upload macOS DMG
         uses: actions/upload-artifact@v4
@@ -170,7 +186,7 @@ jobs:
           path: DriftPaper-macOS.dmg
 
   release:
-    needs: [version, build-windows, create-universal-macos]
+    needs: [checks, version, build-windows, create-universal-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -200,10 +216,8 @@ jobs:
           # Zip Windows executable
           cd windows && zip -r ../DriftPaper-Windows.zip DriftPaper.exe && cd ..
 
-          # Restructure macOS app (artifact downloads without .app wrapper)
-          mkdir -p DriftPaper.app
-          mv macos-app/Contents DriftPaper.app/
-          zip -r DriftPaper-macOS.zip DriftPaper.app
+          # The app was zipped and verified on macOS before artifact upload.
+          cp macos-app/DriftPaper-macOS.zip DriftPaper-macOS.zip
 
       - name: Create tag
         env:

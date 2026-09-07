@@ -2,11 +2,8 @@ use std::borrow::Cow;
 use wgpu::util::DeviceExt;
 
 pub struct Context {
-    bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
     texture_bind_groups: Vec<(String, wgpu::BindGroup)>,
-    sampler: wgpu::Sampler,
-    pipeline_layout: wgpu::PipelineLayout,
     pipeline: wgpu::RenderPipeline,
 }
 
@@ -21,6 +18,20 @@ impl Context {
         device: &wgpu::Device,
         swapchain_format: wgpu::TextureFormat,
         texture_views: &[(&str, &wgpu::TextureView)],
+    ) -> Self {
+        Self::new_with_resources(
+            device,
+            swapchain_format,
+            texture_views,
+            &std::sync::Arc::new(crate::SharedResources::new(device)),
+        )
+    }
+
+    pub(crate) fn new_with_resources(
+        device: &wgpu::Device,
+        swapchain_format: wgpu::TextureFormat,
+        texture_views: &[(&str, &wgpu::TextureView)],
+        resources: &std::sync::Arc<crate::SharedResources>,
     ) -> Self {
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
@@ -140,15 +151,15 @@ impl Context {
             push_constant_ranges: &[],
         });
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: None,
+        let shader = resources.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("shader:debug_texture"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
                 "../../shader/texture.wgsl"
             ))),
         });
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: None,
+        let pipeline = resources.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("pipeline:debug_texture"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -173,11 +184,8 @@ impl Context {
         });
 
         Self {
-            bind_group_layout,
             bind_group,
             texture_bind_groups,
-            sampler,
-            pipeline_layout,
             pipeline,
         }
     }
