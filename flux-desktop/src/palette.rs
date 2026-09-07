@@ -11,18 +11,30 @@ pub(crate) fn density_to_grid_spacing(density: u32) -> u32 {
     }
 }
 
-/// Get color preset from scheme index
+/// Stable preference ID, menu label, CLI key, and renderer preset. ID 4 remains Custom Image.
+pub(crate) const PALETTE_PRESETS: [(u32, &str, &str, flux::settings::ColorPreset); 9] = {
+    use flux::settings::ColorPreset::*;
+    [
+        (0, "Original", "original", Original),
+        (1, "Plasma", "plasma", Plasma),
+        (2, "Poolside", "poolside", Poolside),
+        (3, "Space Grey", "space-grey", SpaceGrey),
+        (5, "Aurora", "aurora", Aurora),
+        (6, "Ember", "ember", Ember),
+        (7, "Deep Ocean", "deep-ocean", DeepOcean),
+        (8, "Rose Quartz", "rose-quartz", RoseQuartz),
+        (9, "Moonlight", "moonlight", Moonlight),
+    ]
+};
+
 pub(crate) fn scheme_to_color_mode(scheme: u32) -> flux::settings::ColorMode {
-    use flux::settings::{ColorMode, ColorPreset};
-    match scheme {
-        0 => ColorMode::Preset(ColorPreset::Original),
-        1 => ColorMode::Preset(ColorPreset::Plasma),
-        2 => ColorMode::Preset(ColorPreset::Poolside),
-        3 => ColorMode::Preset(ColorPreset::SpaceGrey),
-        // 4 = Custom Image - use Original as placeholder; actual custom wheel is injected separately
-        4 => ColorMode::Preset(ColorPreset::Original),
-        _ => ColorMode::Preset(ColorPreset::Original),
-    }
+    flux::settings::ColorMode::Preset(
+        PALETTE_PRESETS
+            .iter()
+            .find(|entry| entry.0 == scheme)
+            .map(|entry| entry.3)
+            .unwrap_or_default(),
+    )
 }
 
 /// Convert HSL values to RGB floats (0.0-1.0)
@@ -233,5 +245,39 @@ pub(crate) fn brightness_to_multiplier(brightness: u32) -> f32 {
         2 => 2.0, // Bright
         3 => 3.5, // Vivid
         _ => 1.0,
+    }
+}
+
+#[cfg(test)]
+mod catalog_tests {
+    use super::*;
+    #[test]
+    fn palette_catalog_has_unique_stable_ids_and_valid_colors() {
+        let mut ids = std::collections::HashSet::new();
+        let mut keys = std::collections::HashSet::new();
+        for (id, _, key, preset) in PALETTE_PRESETS {
+            assert!(ids.insert(id));
+            assert!(keys.insert(key));
+            assert_ne!(id, 4, "Custom Image retains its old ID");
+            assert_eq!(
+                scheme_to_color_mode(id),
+                flux::settings::ColorMode::Preset(preset)
+            );
+            let json = serde_json::to_string(&preset).unwrap();
+            assert_eq!(
+                serde_json::from_str::<flux::settings::ColorPreset>(&json).unwrap(),
+                preset
+            );
+            if let Some(wheel) = preset.to_color_wheel() {
+                assert!(wheel
+                    .iter()
+                    .all(|v| v.is_finite() && (0.0..=1.0).contains(v)));
+                assert!(wheel.chunks_exact(4).all(|c| c[3] == 1.0));
+            }
+        }
+        assert_eq!(
+            PALETTE_PRESETS[..4].iter().map(|e| e.0).collect::<Vec<_>>(),
+            [0, 1, 2, 3]
+        );
     }
 }

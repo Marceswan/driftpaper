@@ -577,12 +577,15 @@ mod tests {
         let view = target.create_view(&Default::default());
         let mut time = 0.0;
         let mut previous_mode = Vec::new();
-        for animation in [
-            settings::Animation::Silk,
-            settings::Animation::Ink,
-            settings::Animation::Topography,
-        ] {
+        for animation in settings::Animation::ALL.into_iter().skip(1) {
             Arc::make_mut(&mut settings).animation = animation;
+            Arc::make_mut(&mut settings).color_mode =
+                settings::ColorMode::Preset(match animation {
+                    settings::Animation::Aurora => settings::ColorPreset::Aurora,
+                    settings::Animation::Caustics => settings::ColorPreset::DeepOcean,
+                    settings::Animation::Metal => settings::ColorPreset::Moonlight,
+                    _ => settings::ColorPreset::Poolside,
+                });
             flux.update(&device, &queue, &settings);
             let warmup = if std::env::var_os("DRIFTPAPER_PREVIEW_DIR").is_some() {
                 300
@@ -636,6 +639,26 @@ mod tests {
                 later != recolored,
                 "{animation:?} must respond to palette changes"
             );
+            let mut previous_palette = recolored;
+            for preset in [
+                settings::ColorPreset::Aurora,
+                settings::ColorPreset::Ember,
+                settings::ColorPreset::DeepOcean,
+                settings::ColorPreset::RoseQuartz,
+                settings::ColorPreset::Moonlight,
+            ] {
+                Arc::make_mut(&mut settings).color_mode = settings::ColorMode::Preset(preset);
+                flux.update(&device, &queue, &settings);
+                let mut encoder = device.create_command_encoder(&Default::default());
+                flux.animate(&device, &queue, &mut encoder, &view, None, time);
+                queue.submit([encoder.finish()]);
+                let pixels = crate::test_support::read_texture(&device, &queue, &target, 4);
+                assert!(
+                    pixels != previous_palette,
+                    "{animation:?} must display {preset:?}"
+                );
+                previous_palette = pixels;
+            }
             Arc::make_mut(&mut settings).color_mode =
                 settings::ColorMode::Preset(settings::ColorPreset::Poolside);
             flux.update(&device, &queue, &settings);

@@ -66,6 +66,47 @@ fn fs(v: VertexOutput) -> @location(0) vec4<f32> {
     // Dye stores three pigment weights so palette changes recolor existing ink.
     let pigment = dye.r * palette(0.0) + dye.g * palette(0.34) + dye.b * palette(0.67);
     color = vec3(0.003, 0.005, 0.009) + (1.0 - exp(-pigment * 1.5)) * 0.65;
+  } else if (u.options.x == 4u) {
+    // Three transparent curtains, with a bright lower edge and tall soft rays.
+    color = palette(0.8) * 0.008;
+    for (var layer = 0u; layer < 3u; layer++) {
+      let l = f32(layer);
+      let curtain = field(vec2(uv.x * 0.85 + l * 0.12, 0.33 + l * 0.17));
+      let base = 0.56 + 0.12 * l + curtain.x * 0.40 + sin(uv.x * 5.0 + l) * 0.06;
+      let height = base - uv.y;
+      let falloff = exp(-max(height, 0.0) * (7.0 + l));
+      let edge = exp(-abs(height) * 75.0);
+      let ray_phase = uv.x * 125.0 + n.x * 6.0 + curtain.y * 12.0;
+      let rays = 0.7 + 0.3 * sin(ray_phase);
+      let mask = smoothstep(-0.015, 0.025, height);
+      color += palette(0.18 + l * 0.23 + height * 0.75 + curtain.y * 0.12)
+        * (0.42 * falloff * mask * rays + 0.25 * edge);
+    }
+  } else if (u.options.x == 5u) {
+    // Two warped wave families form an inexpensive caustic-light approximation.
+    let p = (uv - 0.5) * vec2(u.controls.x, 1.0);
+    let a = p.x * 4.0 + n.y * 2.8 + broad.x * 1.6;
+    let b = p.y * 4.0 + n.x * 2.8 - broad.y * 1.6;
+    let waves = sin(a * 6.2831853) * sin(b * 6.2831853);
+    let ridge = pow(1.0 - abs(waves), 14.0);
+    let glow = pow(1.0 - abs(waves), 3.0);
+    color = palette(0.6 + broad.x * 0.35) * (0.035 + 0.055 * glow)
+      + palette(0.15 + n.y * 0.25) * ridge * 0.40;
+  } else if (u.options.x == 6u) {
+    // Central differences provide resolution-independent surface normals.
+    let e = 0.006;
+    let dx = (field(uv + vec2(e, 0.0)).x - field(uv - vec2(e, 0.0)).x) / (2.0 * e * u.controls.x);
+    let dy = (field(uv + vec2(0.0, e)).x - field(uv - vec2(0.0, e)).x) / (2.0 * e);
+    let normal = normalize(vec3(-dx * 0.40, -dy * 0.40, 1.0));
+    let reflection = reflect(vec3(0.0, 0.0, -1.0), normal);
+    // Broad studio lights plus a thin softbox reflection, without an environment map.
+    let softbox = exp(-pow((reflection.y - 0.24) * 6.0, 2.0));
+    let strip = exp(-pow((reflection.x + reflection.y * 0.35 + 0.3) * 16.0, 2.0));
+    let ambient = 0.5 + 0.5 * reflection.y;
+    let fresnel = pow(1.0 - normal.z, 3.0);
+    let tint = palette(0.5 + broad.y * 0.45 + reflection.x * 0.15);
+    color = tint * (0.045 + 0.16 * ambient + 0.2 * fresnel)
+      + mix(tint, vec3(0.85), 0.7) * (softbox * 0.55 + strip * 0.25);
   } else {
     let elevation = n.x * 0.9 + broad.y * 0.55;
     let levels = elevation * (240.0 / f32(max(u.options.z, 5u)));

@@ -527,24 +527,9 @@ pub(crate) fn setup_menu_bar() {
         }
     }
 
-    extern "C" fn set_color_original(_this: &Object, _cmd: Sel, sender: id) {
-        log::info!("set_color_original action triggered");
-        set_color_scheme(0, sender);
-    }
-
-    extern "C" fn set_color_plasma(_this: &Object, _cmd: Sel, sender: id) {
-        log::info!("set_color_plasma action triggered");
-        set_color_scheme(1, sender);
-    }
-
-    extern "C" fn set_color_poolside(_this: &Object, _cmd: Sel, sender: id) {
-        log::info!("set_color_poolside action triggered");
-        set_color_scheme(2, sender);
-    }
-
-    extern "C" fn set_color_spacegrey(_this: &Object, _cmd: Sel, sender: id) {
-        log::info!("set_color_spacegrey action triggered");
-        set_color_scheme(3, sender);
+    extern "C" fn set_color_preset(_this: &Object, _cmd: Sel, sender: id) {
+        let scheme: i64 = unsafe { msg_send![sender, tag] };
+        set_color_scheme(scheme as u32, sender);
     }
 
     extern "C" fn set_color_custom_image(_this: &Object, _cmd: Sel, _sender: id) {
@@ -887,7 +872,11 @@ pub(crate) fn setup_menu_bar() {
         unsafe {
             let custom: id = msg_send![menu, itemWithTag: 4i64];
             let count: i64 = msg_send![menu, numberOfItems];
-            if custom != nil && count == 5 {
+            let is_color_menu = custom != nil && {
+                let action: Sel = msg_send![custom, action];
+                action == sel!(setColorCustomImage:)
+            };
+            if is_color_menu {
                 for index in 0..count {
                     let item: id = msg_send![menu, itemAtIndex: index];
                     let tag: i64 = msg_send![item, tag];
@@ -917,12 +906,6 @@ pub(crate) fn setup_menu_bar() {
         // Load saved preferences
         let prefs = load_preferences();
         // If custom image scheme is selected but no cached wheel, fall back to Original
-        let effective_scheme = if prefs.color_scheme == 4 && prefs.custom_color_wheel.is_none() {
-            0
-        } else {
-            prefs.color_scheme
-        };
-        CURRENT_COLOR_SCHEME.store(effective_scheme, Ordering::SeqCst);
         CURRENT_DENSITY.store(prefs.density, Ordering::SeqCst);
         CURRENT_NOISE_STRENGTH.store(prefs.noise_strength, Ordering::SeqCst);
         CURRENT_LINE_LENGTH.store(prefs.line_length, Ordering::SeqCst);
@@ -972,20 +955,8 @@ pub(crate) fn setup_menu_bar() {
                 toggle_login_action as extern "C" fn(&Object, Sel, id),
             );
             decl.add_method(
-                sel!(setColorOriginal:),
-                set_color_original as extern "C" fn(&Object, Sel, id),
-            );
-            decl.add_method(
-                sel!(setColorPlasma:),
-                set_color_plasma as extern "C" fn(&Object, Sel, id),
-            );
-            decl.add_method(
-                sel!(setColorPoolside:),
-                set_color_poolside as extern "C" fn(&Object, Sel, id),
-            );
-            decl.add_method(
-                sel!(setColorSpacegrey:),
-                set_color_spacegrey as extern "C" fn(&Object, Sel, id),
+                sel!(setColorPreset:),
+                set_color_preset as extern "C" fn(&Object, Sel, id),
             );
             decl.add_method(
                 sel!(setColorCustomImage:),
@@ -1152,23 +1123,15 @@ pub(crate) fn setup_menu_bar() {
         let color_menu = NSMenu::new(nil).autorelease();
         let _: () = msg_send![color_menu, setDelegate: handler];
         let _: () = msg_send![color_menu, setAutoenablesItems: NO]; // Prevent auto-disabling
-        let color_names = ["Original", "Plasma", "Poolside", "Space Grey"];
-        let color_selectors = [
-            sel!(setColorOriginal:),
-            sel!(setColorPlasma:),
-            sel!(setColorPoolside:),
-            sel!(setColorSpacegrey:),
-        ];
-
-        for (i, (name, action)) in color_names.iter().zip(color_selectors.iter()).enumerate() {
+        for &(scheme, name, _, _) in &PALETTE_PRESETS {
             let item_title = NSString::alloc(nil).init_str(name);
             let item: id = msg_send![class!(NSMenuItem), alloc];
-            let item: id = msg_send![item, initWithTitle:item_title action:*action keyEquivalent:NSString::alloc(nil).init_str("")];
+            let item: id = msg_send![item, initWithTitle:item_title action:sel!(setColorPreset:) keyEquivalent:NSString::alloc(nil).init_str("")];
             let _: () = msg_send![item, setTarget: handler];
-            let _: () = msg_send![item, setTag: i as i64];
+            let _: () = msg_send![item, setTag: scheme as i64];
             let _: () = msg_send![item, setEnabled: YES]; // Ensure item is enabled
                                                           // Set initial checkmark based on saved preference
-            if i as u32 == prefs.color_scheme {
+            if scheme == CURRENT_COLOR_SCHEME.load(Ordering::SeqCst) {
                 let _: () = msg_send![item, setState: 1i64]; // NSOnState
             }
 
@@ -1189,6 +1152,7 @@ pub(crate) fn setup_menu_bar() {
 
         // Separator before custom image option
         let color_sep: id = msg_send![class!(NSMenuItem), separatorItem];
+        let _: () = msg_send![color_sep, setTag: -1i64];
         color_menu.addItem_(color_sep);
 
         // "Custom Image..." menu item
@@ -1198,7 +1162,7 @@ pub(crate) fn setup_menu_bar() {
         let _: () = msg_send![custom_item, setTarget: handler];
         let _: () = msg_send![custom_item, setTag: 4i64];
         let _: () = msg_send![custom_item, setEnabled: YES];
-        if prefs.color_scheme == 4 {
+        if CURRENT_COLOR_SCHEME.load(Ordering::SeqCst) == 4 {
             let _: () = msg_send![custom_item, setState: 1i64]; // NSOnState
         }
         color_menu.addItem_(custom_item);
@@ -1588,11 +1552,6 @@ pub(crate) fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
     let prefs = load_preferences();
 
     // Load cached custom color wheel if available, or fall back
-    let effective_scheme = if prefs.color_scheme == 4 && prefs.custom_color_wheel.is_none() {
-        0
-    } else {
-        prefs.color_scheme
-    };
     if prefs.color_scheme == 4 {
         if let Some(wheel) = prefs.custom_color_wheel {
             if let Ok(mut guard) = custom_color_wheel().lock() {
@@ -1603,7 +1562,6 @@ pub(crate) fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
     }
 
     // Load preferences into atomics
-    CURRENT_COLOR_SCHEME.store(effective_scheme, Ordering::SeqCst);
     CURRENT_DENSITY.store(prefs.density, Ordering::SeqCst);
     CURRENT_NOISE_STRENGTH.store(prefs.noise_strength, Ordering::SeqCst);
     CURRENT_LINE_LENGTH.store(prefs.line_length, Ordering::SeqCst);
@@ -1616,17 +1574,31 @@ pub(crate) fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
 
     // Color Scheme submenu
     let color_submenu = Submenu::new("Color Scheme", true);
-    let color_original = CheckMenuItem::new("Original", true, prefs.color_scheme == 0, None);
-    let color_plasma = CheckMenuItem::new("Plasma", true, prefs.color_scheme == 1, None);
-    let color_poolside = CheckMenuItem::new("Poolside", true, prefs.color_scheme == 2, None);
-    let color_spacegrey = CheckMenuItem::new("Space Grey", true, prefs.color_scheme == 3, None);
-    let color_custom = CheckMenuItem::new("Custom Image...", true, prefs.color_scheme == 4, None);
-    let _ = color_submenu.append(&color_original);
-    let _ = color_submenu.append(&color_plasma);
-    let _ = color_submenu.append(&color_poolside);
-    let _ = color_submenu.append(&color_spacegrey);
+    let mut color_values: Vec<_> = PALETTE_PRESETS.iter().map(|entry| entry.0).collect();
+    let mut color_items: Vec<_> = PALETTE_PRESETS
+        .iter()
+        .map(|&(id, label, _, _)| {
+            CheckMenuItem::new(
+                label,
+                true,
+                CURRENT_COLOR_SCHEME.load(Ordering::SeqCst) == id,
+                None,
+            )
+        })
+        .collect();
+    for item in &color_items {
+        let _ = color_submenu.append(item);
+    }
     let _ = color_submenu.append(&muda::PredefinedMenuItem::separator());
-    let _ = color_submenu.append(&color_custom);
+    let custom = CheckMenuItem::new(
+        "Custom Image...",
+        true,
+        CURRENT_COLOR_SCHEME.load(Ordering::SeqCst) == 4,
+        None,
+    );
+    let _ = color_submenu.append(&custom);
+    color_items.push(custom);
+    color_values.push(4);
     let _ = menu.append(&color_submenu);
 
     // Density submenu
@@ -1793,15 +1765,9 @@ pub(crate) fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
     MENU_GROUPS.with(|groups| {
         *groups.borrow_mut() = vec![
             (
-                vec![
-                    color_original.clone(),
-                    color_plasma.clone(),
-                    color_poolside.clone(),
-                    color_spacegrey.clone(),
-                    color_custom.clone(),
-                ],
+                color_items.clone(),
                 &CURRENT_COLOR_SCHEME,
-                vec![0, 1, 2, 3, 4],
+                color_values.clone(),
             ),
             (
                 vec![
@@ -1864,7 +1830,7 @@ pub(crate) fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
             (
                 animation_items.clone(),
                 &CURRENT_ANIMATION,
-                vec![0, 1, 2, 3],
+                (0..flux::settings::Animation::ALL.len() as u32).collect(),
             ),
             (speed_items.clone(), &CURRENT_ANIMATION_SPEED, vec![0, 1, 2]),
         ];
@@ -1877,16 +1843,7 @@ pub(crate) fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
     let fps_ids: Vec<_> = fps_items.iter().map(|item| item.id().0.clone()).collect();
 
     // Extract string IDs before spawning thread (MenuId contains Rc which is not Send)
-    let color_ids: Vec<String> = [
-        &color_original,
-        &color_plasma,
-        &color_poolside,
-        &color_spacegrey,
-        &color_custom,
-    ]
-    .iter()
-    .map(|item| item.id().0.clone())
-    .collect();
+    let color_ids: Vec<_> = color_items.iter().map(|item| item.id().0.clone()).collect();
     let density_ids: Vec<String> = [&density_sparse, &density_normal, &density_dense]
         .iter()
         .map(|item| item.id().0.clone())
@@ -1949,9 +1906,9 @@ pub(crate) fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
                     }
                 }
                 // Check color scheme
-                for (i, color_id) in color_ids.iter().enumerate() {
+                for (color_id, &scheme) in color_ids.iter().zip(&color_values) {
                     if id_str == color_id {
-                        if i == 4 {
+                        if scheme == 4 {
                             // Custom Image - open file dialog
                             let dialog = rfd::FileDialog::new()
                                 .add_filter("Images", &["png", "jpg", "jpeg", "bmp", "webp"])
@@ -1983,14 +1940,14 @@ pub(crate) fn setup_menu_bar() -> Option<tray_icon::TrayIcon> {
                                 continue;
                             }
                         } else {
-                            CURRENT_COLOR_SCHEME.store(i as u32, Ordering::SeqCst);
+                            CURRENT_COLOR_SCHEME.store(scheme, Ordering::SeqCst);
                             SETTINGS_CHANGED.store(true, Ordering::SeqCst);
                             wake();
                             update_preferences(|prefs| {
-                                prefs.color_scheme = i as u32;
+                                prefs.color_scheme = scheme;
                             });
                         }
-                        log::info!("Color scheme changed to {}", i);
+                        log::info!("Color scheme changed to {}", scheme);
                     }
                 }
 

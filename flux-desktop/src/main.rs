@@ -63,8 +63,12 @@ struct Args {
     fps: Option<u32>,
 
     /// Animation override; does not overwrite the saved preference
-    #[arg(long, value_parser = ["drift", "silk", "ink", "topography"])]
+    #[arg(long, value_parser = flux::settings::Animation::KEYS)]
     animation: Option<String>,
+
+    /// Palette override; does not overwrite the saved preference
+    #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(PALETTE_PRESETS.iter().map(|entry| entry.2)))]
+    palette: Option<String>,
 
     /// Animation speed override, independent of FPS
     #[arg(long, value_parser = ["slow", "normal", "fast"])]
@@ -84,7 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .animation
         .as_deref()
         .and_then(|name| {
-            ["drift", "silk", "ink", "topography"]
+            flux::settings::Animation::KEYS
                 .iter()
                 .position(|v| *v == name)
         })
@@ -98,7 +102,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(prefs.animation_speed);
     CURRENT_ANIMATION.store(animation, Ordering::SeqCst);
     CURRENT_ANIMATION_SPEED.store(speed, Ordering::SeqCst);
-    CURRENT_COLOR_SCHEME.store(prefs.color_scheme, Ordering::SeqCst);
+    let scheme = args
+        .palette
+        .as_deref()
+        .and_then(|key| PALETTE_PRESETS.iter().find(|entry| entry.2 == key))
+        .map(|entry| entry.0)
+        .unwrap_or(prefs.color_scheme);
+    CURRENT_COLOR_SCHEME.store(scheme, Ordering::SeqCst);
     CURRENT_DENSITY.store(prefs.density, Ordering::SeqCst);
     CURRENT_NOISE_STRENGTH.store(prefs.noise_strength, Ordering::SeqCst);
     CURRENT_LINE_LENGTH.store(prefs.line_length, Ordering::SeqCst);
@@ -140,6 +150,15 @@ mod tests {
         assert_eq!(args.animation.as_deref(), Some("ink"));
         assert_eq!(args.speed.as_deref(), Some("slow"));
         assert!(args.windowed);
+        for animation in flux::settings::Animation::KEYS {
+            for (_, _, palette, _) in PALETTE_PRESETS {
+                let args =
+                    Args::try_parse_from(["drift", "--animation", animation, "--palette", palette])
+                        .unwrap();
+                assert_eq!(args.palette.as_deref(), Some(palette));
+            }
+        }
+        assert!(Args::try_parse_from(["drift", "--palette", "missing"]).is_err());
         assert!(Args::try_parse_from(["drift", "--animation", "missing"]).is_err());
         assert!(Args::try_parse_from(["drift", "--speed", "0"]).is_err());
     }

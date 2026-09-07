@@ -98,7 +98,12 @@ impl UserPreferences {
         }) {
             self.custom_color_wheel = None;
         }
-        if self.color_scheme > 4 || (self.color_scheme == 4 && self.custom_color_wheel.is_none()) {
+        if (!crate::palette::PALETTE_PRESETS
+            .iter()
+            .any(|entry| entry.0 == self.color_scheme)
+            && self.color_scheme != 4)
+            || (self.color_scheme == 4 && self.custom_color_wheel.is_none())
+        {
             self.color_scheme = 0;
         }
     }
@@ -186,6 +191,35 @@ mod tests {
         assert_eq!(loaded.animation_speed, 0);
         assert_eq!(loaded.custom_color_wheel, prefs.custom_color_wheel);
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+    #[test]
+    fn every_palette_and_animation_survives_preferences_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        for (scheme, _, _, _) in crate::palette::PALETTE_PRESETS {
+            for animation in 0..flux::settings::Animation::ALL.len() as u32 {
+                let prefs = UserPreferences {
+                    color_scheme: scheme,
+                    animation,
+                    custom_color_wheel: Some([0.5; 24]),
+                    ..Default::default()
+                };
+                write_preferences(&path, &prefs).unwrap();
+                let restored = read_preferences(&path);
+                assert_eq!(
+                    (restored.color_scheme, restored.animation),
+                    (scheme, animation)
+                );
+                assert_eq!(restored.custom_color_wheel, prefs.custom_color_wheel);
+            }
+        }
+        let prefs = UserPreferences {
+            color_scheme: 4,
+            custom_color_wheel: Some([0.3; 24]),
+            ..Default::default()
+        };
+        write_preferences(&path, &prefs).unwrap();
+        assert_eq!(read_preferences(&path).color_scheme, 4);
     }
     #[test]
     fn invalid_animation_preferences_preserve_other_settings() {

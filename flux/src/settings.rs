@@ -88,12 +88,39 @@ pub enum Animation {
     Silk,
     Ink,
     Topography,
+    Aurora,
+    Caustics,
+    Metal,
 }
 
 impl Animation {
-    pub const ALL: [Self; 4] = [Self::Drift, Self::Silk, Self::Ink, Self::Topography];
-    pub const LABELS: [&'static str; 4] =
-        ["Drift", "Flowing Silk", "Ink in Water", "Living Topography"];
+    pub const ALL: [Self; 7] = [
+        Self::Drift,
+        Self::Silk,
+        Self::Ink,
+        Self::Topography,
+        Self::Aurora,
+        Self::Caustics,
+        Self::Metal,
+    ];
+    pub const LABELS: [&'static str; 7] = [
+        "Drift",
+        "Flowing Silk",
+        "Ink in Water",
+        "Living Topography",
+        "Aurora Curtains",
+        "Pool Caustics",
+        "Liquid Metal",
+    ];
+    pub const KEYS: [&'static str; 7] = [
+        "drift",
+        "silk",
+        "ink",
+        "topography",
+        "aurora",
+        "caustics",
+        "metal",
+    ];
 
     pub fn from_index(index: u32) -> Self {
         Self::ALL.get(index as usize).copied().unwrap_or_default()
@@ -112,10 +139,23 @@ impl Settings {
                         channel.multiplier *= 0.045;
                     }
                 }
-                Animation::Topography => {
+                Animation::Topography | Animation::Caustics => {
                     channel.scale *= 0.55;
                     if index > 0 {
                         channel.multiplier *= 0.12;
+                    }
+                }
+                Animation::Aurora => {
+                    channel.scale *= 0.65;
+                    if index > 0 {
+                        channel.multiplier *= 0.06;
+                    }
+                }
+                Animation::Metal => {
+                    channel.scale *= 0.5;
+                    // Surface derivatives amplify small, high-frequency noise.
+                    if index > 0 {
+                        channel.multiplier *= 0.002;
                     }
                 }
                 _ => {}
@@ -188,6 +228,11 @@ pub enum ColorPreset {
     Plasma,
     Poolside,
     SpaceGrey,
+    Aurora,
+    Ember,
+    DeepOcean,
+    RoseQuartz,
+    Moonlight,
 }
 
 impl ColorPreset {
@@ -196,9 +241,34 @@ impl ColorPreset {
             ColorPreset::Plasma => Some(COLOR_SCHEME_PLASMA),
             ColorPreset::Poolside => Some(COLOR_SCHEME_POOLSIDE),
             ColorPreset::SpaceGrey => Some(COLOR_SCHEME_SPACE_GREY),
+            ColorPreset::Aurora => Some(hex_palette([
+                0x123d4d, 0x259e83, 0x7fd9ad, 0x687fc4, 0x956bbc, 0x314f85,
+            ])),
+            ColorPreset::Ember => Some(hex_palette([
+                0x321c36, 0x7c2e41, 0xc95636, 0xe79454, 0xf0c58d, 0x8e493d,
+            ])),
+            ColorPreset::DeepOcean => Some(hex_palette([
+                0x101f45, 0x204779, 0x277d9e, 0x60b6b4, 0x83c4d4, 0x485d92,
+            ])),
+            ColorPreset::RoseQuartz => Some(hex_palette([
+                0x513e6b, 0x966588, 0xcf94ab, 0xe5bbc2, 0xb3a3cf, 0x74638e,
+            ])),
+            ColorPreset::Moonlight => Some(hex_palette([
+                0x263246, 0x50637b, 0x8c9ba9, 0xc6ccc8, 0x9dadaf, 0x566779,
+            ])),
             _ => None,
         }
     }
+}
+
+fn hex_palette(colors: [u32; 6]) -> [f32; 24] {
+    let mut wheel = [1.0; 24];
+    for (rgba, color) in wheel.chunks_exact_mut(4).zip(colors) {
+        rgba[0] = ((color >> 16) & 255) as f32 / 255.0;
+        rgba[1] = ((color >> 8) & 255) as f32 / 255.0;
+        rgba[2] = (color & 255) as f32 / 255.0;
+    }
+    wheel
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]

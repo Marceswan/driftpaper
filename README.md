@@ -15,9 +15,9 @@ DriftPaper runs as a menu bar app, rendering a beautiful fluid simulation as you
 
 | Setting | Options |
 |---------|---------|
-| **Animation** | Drift, Flowing Silk, Ink in Water, Living Topography |
+| **Animation** | Drift, Flowing Silk, Ink in Water, Living Topography, Aurora Curtains, Pool Caustics, Liquid Metal |
 | **Animation Speed** | Slow, Normal, Fast (independent of frame rate) |
-| **Color Scheme** | Original, Plasma, Poolside, Space Grey |
+| **Color Scheme** | Original, Plasma, Poolside, Space Grey, Aurora, Ember, Deep Ocean, Rose Quartz, Moonlight, Custom Image |
 | **Density** | Sparse, Normal, Dense |
 | **Noise Strength** | Low, Medium, High, Max |
 | **Line Length** | Short, Medium, Long, Extra Long |
@@ -114,7 +114,8 @@ drift --help
 Options:
       --windowed     Run in normal window mode (not as wallpaper)
       --fps <FPS>    Override saved frame rate (1-240; default preference: 30)
-      --animation <ANIMATION>  drift, silk, ink, topography
+      --animation <ANIMATION>  drift, silk, ink, topography, aurora, caustics, metal
+      --palette <PALETTE>      original, plasma, poolside, space-grey, aurora, ember, deep-ocean, rose-quartz, moonlight
       --speed <SPEED>          slow, normal, fast
   -h, --help         Print help
 ```
@@ -123,11 +124,21 @@ On macOS, wallpaper windows ignore mouse input (including right-click) and canno
 
 By default, DriftPaper runs as a wallpaper. Use `--windowed` to run in a normal window for testing or preview.
 
+### Color schemes
+
+Palettes work independently of animation mode: Aurora blends jade, mint and violet;
+Ember runs from plum through copper and amber; Deep Ocean blends navy and teal;
+Rose Quartz mixes mauve, blush and lavender; Moonlight uses cool slate and silver.
+Existing presets and Custom Image remain available, and palette choices persist.
+The `--palette` option previews a preset without changing saved preferences.
+
 ### Animation modes
 
 Choose **Animation** in the macOS menu bar or Windows tray. Flowing Silk draws
 soft, illuminated folds; Ink in Water carries pigment through the fluid; Living
-Topography draws moving elevation contours. Drift remains the default for existing
+Topography draws moving elevation contours. Aurora Curtains layers translucent
+light ribbons, Pool Caustics approximates refracted light patterns, and Liquid
+Metal shades a rippling reflective surface. Drift remains the default for existing
 installations. Mode and speed are saved alongside your palette.
 
 Color Scheme, Brightness, Noise Strength, View Scale and Animation Speed apply
@@ -141,10 +152,13 @@ Preview without changing saved preferences:
 ./target/release/drift --windowed --animation silk --speed slow
 ./target/release/drift --windowed --animation ink
 ./target/release/drift --windowed --animation topography
+./target/release/drift --windowed --animation aurora --palette aurora
+./target/release/drift --windowed --animation caustics --palette deep-ocean
+./target/release/drift --windowed --animation metal --palette moonlight
 ```
 
-The new modes share cached GPU programs. Silk and Topography skip fluid solving
-and line placement; Ink uses two dye textures capped at 1024 texels on the longest
+The new modes share cached GPU programs. Silk, Topography, Aurora, Caustics, and
+Metal skip fluid solving and line placement; Ink uses two dye textures capped at 1024 texels on the longest
 side. The existing sleep, frame-rate, and multi-display behavior applies to all modes.
 
 ## Credits
