@@ -61,6 +61,11 @@ gh secret set APPLE_API_KEY_ID --repo Marceswan/driftpaper
 gh secret set APPLE_API_ISSUER_ID --repo Marceswan/driftpaper
 ```
 
+The signing step downloads the Developer ID G1/G2 intermediate certificates from
+Apple's PKI service and imports them without changing trust settings. This supplies
+the chain that Xcode normally installs on developer Macs. It requires a valid
+imported identity before submitting anything to Apple.
+
 The signing step uses an isolated temporary keychain and does not change the
 default keychain or search list. An exit trap removes that keychain and private
 files on success and failure; jobs run on disposable GitHub-hosted machines.

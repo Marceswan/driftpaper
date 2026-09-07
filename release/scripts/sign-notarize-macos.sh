@@ -22,11 +22,26 @@ printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$work_dir/certi
 security create-keychain -p "$keychain_password" "$keychain_path"
 security set-keychain-settings -lut 3600 "$keychain_path"
 security unlock-keychain -p "$keychain_password" "$keychain_path"
+# Xcode installs these on developer Macs, but clean CI runners may lack them.
+# Import the intermediates without changing trust settings; macOS validates them
+# against its existing Apple root certificates.
+for authority in DeveloperIDCA DeveloperIDG2CA; do
+  curl --fail --silent --show-error --location --retry 3 --max-time 60 \
+    "https://www.apple.com/certificateauthority/$authority.cer" \
+    -o "$work_dir/$authority.cer"
+  security import "$work_dir/$authority.cer" -k "$keychain_path" >/dev/null
+done
 security import "$work_dir/certificate.p12" -k "$keychain_path" \
   -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign >/dev/null
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
   -k "$keychain_password" "$keychain_path" >/dev/null
 rm "$work_dir/certificate.p12"
+identities=$(security find-identity -v -p codesigning "$keychain_path")
+if ! printf '%s\n' "$identities" | grep -Fq "\"$APPLE_SIGNING_IDENTITY\""; then
+  printf '%s\n' "$identities" >&2
+  echo 'Imported Developer ID identity is not valid; check the private key and certificate chain.' >&2
+  exit 1
+fi
 
 printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$work_dir/notary.p8"
 xcrun notarytool store-credentials driftpaper-ci --keychain "$keychain_path" \

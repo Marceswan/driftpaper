@@ -16,6 +16,11 @@ with open(os.environ['TOOL_LOG'], 'a') as log:
     log.write(json.dumps([name, *args]) + '\n')
 if name == 'security' and args[0] == 'import' and os.environ.get('FAIL_IMPORT'):
     sys.exit(1)
+if name == 'security' and args[0] == 'find-identity' and not os.environ.get('INVALID_IDENTITY'):
+    print('1) FINGERPRINT "' + os.environ['APPLE_SIGNING_IDENTITY'] + '"')
+if name == 'curl':
+    if os.environ.get('FAIL_CA_DOWNLOAD'): sys.exit(1)
+    pathlib.Path(args[args.index('-o') + 1]).write_text('test intermediate')
 if name == 'codesign' and '--display' in args:
     print('TeamIdentifier=' + os.environ.get('SIGNED_TEAM', 'ABCDEFGHIJ'))
 if name == 'xcrun' and args[:2] == ['notarytool', 'submit']:
@@ -45,7 +50,7 @@ class SigningTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        for name in ["security", "codesign", "xcrun", "ditto", "hdiutil", "spctl", "plutil"]:
+        for name in ["security", "codesign", "xcrun", "ditto", "hdiutil", "spctl", "plutil", "curl"]:
             tool = self.bin / name
             tool.write_text(FAKE_TOOL)
             tool.chmod(0o755)
@@ -85,6 +90,20 @@ class SigningTests(unittest.TestCase):
         self.assertLess(submit[1], staple[1])
         self.assertEqual(calls[-1][0:2], ["security", "delete-keychain"])
         self.assertTrue((self.root / "output/DriftPaper-macOS.dmg").exists())
+        ca_imports = [i for i, c in enumerate(calls) if c[:2] == ["security", "import"] and c[2].endswith('.cer')]
+        identity_check = next(i for i, c in enumerate(calls) if c[:2] == ["security", "find-identity"])
+        self.assertEqual(len(ca_imports), 2)
+        self.assertTrue(all(i < identity_check < submit[0] for i in ca_imports))
+
+    def test_untrusted_identity_stops_before_notarization(self):
+        result, calls = self.run_signing(INVALID_IDENTITY="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(c[0] == "codesign" or c[:2] == ["xcrun", "notarytool"] for c in calls))
+
+    def test_failed_intermediate_download_stops_signing(self):
+        result, calls = self.run_signing(FAIL_CA_DOWNLOAD="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(c[0] == "codesign" for c in calls))
 
     def test_missing_secret_stops_before_keychain_import(self):
         result, calls = self.run_signing(APPLE_API_KEY_P8_BASE64="")
