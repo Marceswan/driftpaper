@@ -67,8 +67,10 @@ the chain that Xcode normally installs on developer Macs. It requires a valid
 imported identity before submitting anything to Apple.
 
 The signing step uses an isolated temporary keychain and does not change the
-default keychain or search list. An exit trap removes that keychain and private
-files on success and failure; jobs run on disposable GitHub-hosted machines.
+default keychain. It temporarily adds its keychain to the user search list so
+`codesign` can resolve the private key. An exit trap restores the original search
+list and removes the temporary keychain and private files on success and failure;
+jobs run on disposable GitHub-hosted machines.
 Secrets are passed only to the configuration check and signing step.
 
 ## Run and verify

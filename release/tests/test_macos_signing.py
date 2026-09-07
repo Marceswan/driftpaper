@@ -18,6 +18,8 @@ if name == 'security' and args[0] == 'import' and os.environ.get('FAIL_IMPORT'):
     sys.exit(1)
 if name == 'security' and args[0] == 'find-identity' and not os.environ.get('INVALID_IDENTITY'):
     print('1) FINGERPRINT "' + os.environ['APPLE_SIGNING_IDENTITY'] + '"')
+if name == 'security' and args[0] == 'list-keychains' and '-s' not in args:
+    print('"/Users/test/Library/Keychains/login keychain-db"')
 if name == 'curl':
     if os.environ.get('FAIL_CA_DOWNLOAD'): sys.exit(1)
     pathlib.Path(args[args.index('-o') + 1]).write_text('test intermediate')
@@ -94,6 +96,11 @@ class SigningTests(unittest.TestCase):
         identity_check = next(i for i, c in enumerate(calls) if c[:2] == ["security", "find-identity"])
         self.assertEqual(len(ca_imports), 2)
         self.assertTrue(all(i < identity_check < submit[0] for i in ca_imports))
+        search_updates = [c for c in calls if c[:5] == ["security", "list-keychains", "-d", "user", "-s"]]
+        self.assertEqual(len(search_updates), 2)
+        self.assertTrue(search_updates[0][5].endswith("signing.keychain-db"))
+        self.assertEqual(search_updates[0][6:], ["/Users/test/Library/Keychains/login keychain-db"])
+        self.assertEqual(search_updates[1][5:], ["/Users/test/Library/Keychains/login keychain-db"])
 
     def test_untrusted_identity_stops_before_notarization(self):
         result, calls = self.run_signing(INVALID_IDENTITY="1")
@@ -126,6 +133,7 @@ class SigningTests(unittest.TestCase):
         result, calls = self.run_signing(FAIL_IMPORT="1")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(calls[-1][:2], ["security", "delete-keychain"])
+        self.assertEqual(calls[-2], ["security", "list-keychains", "-d", "user", "-s", "/Users/test/Library/Keychains/login keychain-db"])
 
     def test_rejected_app_never_gets_packaged(self):
         result, calls = self.run_signing(APP_STATUS="Invalid")

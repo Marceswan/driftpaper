@@ -9,7 +9,25 @@ test -f "$app_path/Contents/MacOS/DriftPaper"
 mkdir -p "$output_dir"
 work_dir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/driftpaper-signing.XXXXXX")
 keychain_path="$work_dir/signing.keychain-db"
+configure_search_list() {
+  python3 - "$work_dir/keychain-search-list.json" "$keychain_path" "$1" <<'PY'
+import json, shlex, subprocess, sys
+snapshot, temporary, mode = sys.argv[1:]
+if mode == 'install':
+    original = shlex.split(subprocess.check_output(['security', 'list-keychains', '-d', 'user'], text=True))
+    with open(snapshot, 'w') as file:
+        json.dump(original, file)
+    paths = [temporary, *original]
+else:
+    with open(snapshot) as file:
+        paths = json.load(file)
+subprocess.run(['security', 'list-keychains', '-d', 'user', '-s', *paths], check=True)
+PY
+}
 cleanup() {
+  if [[ -f "$work_dir/keychain-search-list.json" ]]; then
+    configure_search_list restore >/dev/null 2>&1 || true
+  fi
   security delete-keychain "$keychain_path" >/dev/null 2>&1 || true
   rm -rf "$work_dir"
 }
@@ -22,6 +40,9 @@ printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$work_dir/certi
 security create-keychain -p "$keychain_password" "$keychain_path"
 security set-keychain-settings -lut 3600 "$keychain_path"
 security unlock-keychain -p "$keychain_password" "$keychain_path"
+# codesign also resolves private keys through the user search list, even when
+# --keychain is supplied. Preserve and restore the runner's original list.
+configure_search_list install
 # Xcode installs these on developer Macs, but clean CI runners may lack them.
 # Import the intermediates without changing trust settings; macOS validates them
 # against its existing Apple root certificates.
