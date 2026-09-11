@@ -123,13 +123,14 @@ impl NoiseGenerator {
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         timestep: f32,
+        ticks: f32,
     ) {
         self.elapsed_time += timestep;
         self.channels
             .iter_mut()
             .zip(&self.channel_settings)
             .for_each(|(channel, settings)| {
-                channel.tick(settings, self.elapsed_time);
+                channel.tick(settings, self.elapsed_time, ticks);
             });
         // Queue writes all run before submission. Encode copies so each simulation
         // substep observes its own noise state rather than the last substep's state.
@@ -593,16 +594,18 @@ impl NoiseChannel {
         }
     }
 
-    pub fn tick(&mut self, channel_settings: &settings::Noise, elapsed_time: f32) {
+    /// Advance by `ticks` fixed simulation steps; fractional ticks allow per-frame updates.
+    pub fn tick(&mut self, channel_settings: &settings::Noise, elapsed_time: f32, ticks: f32) {
         let scale = channel_settings.scale
             * (1.0 + 0.15 * (0.01 * elapsed_time * std::f32::consts::TAU).sin());
         self.scale = [scale, scale];
         self.multiplier = channel_settings.multiplier;
-        self.offset_1 += channel_settings.offset_increment;
+        let increment = channel_settings.offset_increment * ticks;
+        self.offset_1 += increment;
 
         if self.offset_1 > Self::BLEND_THRESHOLD {
-            self.blend_factor += channel_settings.offset_increment;
-            self.offset_2 += channel_settings.offset_increment;
+            self.blend_factor += increment;
+            self.offset_2 += increment;
         }
 
         // Reset blending

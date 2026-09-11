@@ -393,9 +393,25 @@ impl Flux {
             self.settings.animation,
             settings::Animation::Drift | settings::Animation::Ink
         ) || self.settings.mode != settings::Mode::Normal;
-        while self.fluid_frame_time >= self.settings.fluid_timestep {
+        if !needs_fluid {
+            // Noise-only surfaces have no simulation state, so sample noise at the exact
+            // frame time. Fixed substeps would alternate between 0, 1 and 2 steps per frame.
+            self.noise_generator.update_buffers(
+                device,
+                encoder,
+                timestep,
+                timestep / self.settings.fluid_timestep,
+            );
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("flux::noise"),
+                timestamp_writes: None,
+            });
+            self.noise_generator.generate(&mut cpass);
+            self.fluid_frame_time = 0.0;
+        }
+        while needs_fluid && self.fluid_frame_time >= self.settings.fluid_timestep {
             self.noise_generator
-                .update_buffers(device, encoder, self.settings.fluid_timestep);
+                .update_buffers(device, encoder, self.settings.fluid_timestep, 1.0);
 
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("flux::compute"),

@@ -415,7 +415,7 @@ pub(crate) fn run(event_loop: EventLoop<UserEvent>, args: Args) -> Result<()> {
                 // Low-frequency display reconciliation also retries failed initialization.
                 // Sleep/lock uses true Wait; native events wake the loop again.
                 target.set_control_flow(if suspended || power::paused() { ControlFlow::Wait }
-                    else if active { ControlFlow::WaitUntil(if wallpaper { clock.deadline(fps).min(reconcile_at) } else { clock.deadline(fps) }) }
+                    else if active { ControlFlow::WaitUntil(if wallpaper { clock.deadline().min(reconcile_at) } else { clock.deadline() }) }
                     else if wallpaper { ControlFlow::WaitUntil(reconcile_at) }
                     else { ControlFlow::Wait });
             }
@@ -427,33 +427,47 @@ pub(crate) fn run(event_loop: EventLoop<UserEvent>, args: Args) -> Result<()> {
 
 struct FrameClock {
     last: Instant,
+    next: Instant,
     elapsed: Duration,
     active: bool,
 }
+// Timer wake-ups may arrive slightly early; rendering then keeps the cadence steady.
+const FRAME_SLACK: Duration = Duration::from_millis(2);
 impl FrameClock {
     fn new(now: Instant) -> Self {
         Self {
             last: now,
+            next: now,
             elapsed: Duration::ZERO,
             active: false,
         }
     }
     fn tick(&mut self, now: Instant, fps: u32, active: bool) -> bool {
+        let frame = frame_duration(fps);
         if !active || !self.active {
             self.last = now;
+            self.next = now + frame;
             self.active = active;
             return active;
         }
-        let delta = now.duration_since(self.last);
-        if delta < frame_duration(fps) {
+        if now + FRAME_SLACK < self.next {
             return false;
         }
-        self.elapsed += delta.min(Duration::from_millis(100));
+        self.elapsed += now
+            .duration_since(self.last)
+            .min(Duration::from_millis(100));
         self.last = now;
+        // Schedule from the ideal frame time so wake-up latency does not accumulate
+        // into uneven frame intervals. Resynchronize after a stall.
+        self.next = if now >= self.next + frame {
+            now + frame
+        } else {
+            self.next + frame
+        };
         true
     }
-    fn deadline(&self, fps: u32) -> Instant {
-        self.last + frame_duration(fps)
+    fn deadline(&self) -> Instant {
+        self.next
     }
     fn timestamp_ms(&self) -> f64 {
         self.elapsed.as_secs_f64() * 1000.0
@@ -513,5 +527,22 @@ mod tests {
         clock.tick(start + Duration::from_secs(1), 30, false);
         clock.tick(start + Duration::from_secs(3600), 30, true);
         assert_eq!(clock.elapsed, Duration::from_millis(34));
+    }
+    #[test]
+    fn frame_clock_does_not_accumulate_wakeup_latency() {
+        let start = Instant::now();
+        let mut clock = FrameClock::new(start);
+        assert!(clock.tick(start, 60, true));
+        // A late wake-up keeps the next deadline on the original cadence.
+        assert!(clock.tick(start + Duration::from_millis(20), 60, true));
+        assert_eq!(clock.deadline(), start + frame_duration(60) * 2);
+        // A slightly early wake-up still renders.
+        assert!(clock.tick(start + Duration::from_millis(32), 60, true));
+        // A stall resynchronizes instead of rendering a burst of catch-up frames.
+        assert!(clock.tick(start + Duration::from_millis(500), 60, true));
+        assert_eq!(
+            clock.deadline(),
+            start + Duration::from_millis(500) + frame_duration(60)
+        );
     }
 }

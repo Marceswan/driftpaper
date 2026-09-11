@@ -31,7 +31,26 @@ fn palette(t: f32) -> vec3<f32> {
 fn field(uv: vec2<f32>) -> vec2<f32> {
   // Mirror the edges so wide view scales do not expose a clamped border.
   let p = 1.0 - abs(1.0 - 2.0 * fract(uv * 0.5));
-  return textureSampleLevel(noise_texture, linear_sampler, p, 0.0).xy;
+  // Cubic B-spline filtering from four bilinear taps. Bilinear noise has kinks at
+  // texel edges, which make contours and normals crawl as the field evolves.
+  let size = vec2<f32>(textureDimensions(noise_texture));
+  let texel = p * size - 0.5;
+  let base = floor(texel);
+  let f = texel - base;
+  let f2 = f * f;
+  let f3 = f2 * f;
+  let w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+  let w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+  let w3 = f3 / 6.0;
+  let g0 = w0 + w1;
+  let h0 = (base - 0.5 + w1 / g0) / size;
+  let h1 = (base + 1.5 + w3 / (1.0 - g0)) / size;
+  let a = textureSampleLevel(noise_texture, linear_sampler, h0, 0.0).xy;
+  let b = textureSampleLevel(noise_texture, linear_sampler, vec2(h1.x, h0.y), 0.0).xy;
+  let c = textureSampleLevel(noise_texture, linear_sampler, vec2(h0.x, h1.y), 0.0).xy;
+  let d = textureSampleLevel(noise_texture, linear_sampler, h1, 0.0).xy;
+  let g1 = 1.0 - g0;
+  return mix(mix(a, b, g1.x), mix(c, d, g1.x), g1.y);
 }
 
 struct VertexOutput {
