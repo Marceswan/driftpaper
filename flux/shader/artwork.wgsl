@@ -6,6 +6,8 @@ struct Uniforms {
   options: vec4<u32>,
   // UV offset and scale for a screen viewport
   viewport: vec4<f32>,
+  // Speed-scaled elapsed seconds, wrapping at 1000; remaining lanes reserved.
+  motion: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var linear_sampler: sampler;
@@ -51,6 +53,58 @@ fn field(uv: vec2<f32>) -> vec2<f32> {
   let d = textureSampleLevel(noise_texture, linear_sampler, h1, 0.0).xy;
   let g1 = 1.0 - g0;
   return mix(mix(a, b, g1.x), mix(c, d, g1.x), g1.y);
+}
+
+fn hash_cell(p: vec2<f32>) -> vec3<f32> {
+  var h = fract(vec3(p.x, p.y, p.x) * vec3(0.1031, 0.1030, 0.0973));
+  h += dot(h, h.yxz + 33.33);
+  return fract((h.xxy + h.yzz) * h.zyx);
+}
+
+fn rain_background(uv: vec2<f32>) -> vec3<f32> {
+  let fog = field(uv * 0.38 + vec2(0.21, 0.39));
+  var color = palette(0.54 + fog.x * 1.8 + uv.y * 0.11) * 0.28;
+  let p = (uv - 0.5) * vec2(u.controls.x, 1.0);
+  // Defocused lights behind the glass; deliberately broad and low contrast.
+  for (var i = 0u; i < 5u; i++) {
+    let h = hash_cell(vec2(f32(i), 9.0));
+    let center = vec2((f32(i) - 2.0) * 0.27, (h.y - 0.5) * 0.5);
+    let radius = 0.04 + 0.075 * h.z;
+    let d = length(p - center);
+    let light = 1.0 - smoothstep(radius * 0.2, radius + 0.14, d);
+    color += mix(palette(h.z + fog.y * 0.3), vec3(0.65, 0.58, 0.42), 0.25) * light * 0.65;
+  }
+  return color;
+}
+
+// xy: refraction; z: glass highlight; w: wet coverage. Each drop grows,
+// slides, and fades inside its cell before restarting with no visible jump.
+fn rain_layer(p: vec2<f32>, scale: vec2<f32>, offset: vec2<f32>) -> vec4<f32> {
+  let grid = p * scale + offset;
+  let cell = floor(grid);
+  let h = hash_cell(cell);
+  let local = fract(grid) - 0.5;
+  // Integral cycle counts over 1000 seconds keep the wrapped clock seamless.
+  let phase = fract(u.motion.x * 0.02 * (1.0 + floor(h.z * 2.0)) + h.x);
+  let slide = smoothstep(0.36, 0.96, phase);
+  let fade = smoothstep(0.0, 0.12, phase) * (1.0 - smoothstep(0.88, 1.0, phase));
+  let radius = 0.055 + 0.12 * smoothstep(0.0, 0.42, phase);
+  let center = vec2((h.y - 0.5) * 0.48 + 0.035 * sin(slide * 9.0 + h.z * 6.28),
+                    -0.25 + slide * 0.57);
+  let q = (local - center) * vec2(1.0, 0.78);
+  let distance = length(q);
+  let aa = max(fwidth(distance), 0.001);
+  let drop = (1.0 - smoothstep(radius - aa, radius + aa, distance)) * fade;
+  let normal = q / max(radius, 0.01);
+  let lens = max(0.0, 1.0 - dot(normal, normal));
+  let trail_length = 0.42 * slide;
+  let trail = (1.0 - smoothstep(0.009, 0.027, abs(local.x - center.x)))
+    * smoothstep(center.y - trail_length - 0.02, center.y - trail_length + 0.03, local.y)
+    * (1.0 - smoothstep(center.y - 0.03, center.y, local.y)) * slide * fade;
+  let highlight = exp(-dot(normal - vec2(-0.36, -0.4), normal - vec2(-0.36, -0.4)) * 24.0);
+  let rim = pow(clamp(distance / radius, 0.0, 1.0), 8.0);
+  let refraction = normal * lens * drop * 0.10 + vec2(trail * 0.012, 0.0);
+  return vec4(refraction, drop * (highlight * 0.30 + rim * 0.045), max(drop, trail * 0.4));
 }
 
 struct VertexOutput {
@@ -126,6 +180,42 @@ fn fs(v: VertexOutput) -> @location(0) vec4<f32> {
     let tint = palette(0.5 + broad.y * 0.45 + reflection.x * 0.15);
     color = tint * (0.045 + 0.16 * ambient + 0.2 * fresnel)
       + mix(tint, vec3(0.85), 0.7) * (softbox * 0.55 + strip * 0.25);
+  } else if (u.options.x == 7u) {
+    // Broad asymmetric sand ridges: diffuse light on the windward face and
+    // a darker lee. Screen derivatives avoid extra noise reads for normals.
+    let p = (uv - 0.5) * vec2(u.controls.x, 1.0);
+    let phase = p.y * 2.7 + p.x * 0.42
+      + sin(p.x * 2.2 + broad.x * 10.0) * 0.36 + n.y * 2.2;
+    let wave = 0.5 + 0.5 * sin(phase * 6.2831853);
+    let height = pow(wave, 2.4);
+    let slope = vec2(dpdx(height) / max(fwidth(p.x), 0.00001),
+                     dpdy(height) / max(fwidth(p.y), 0.00001));
+    let normal = normalize(vec3(-slope * 0.16, 1.0));
+    let sun = max(dot(normal, normalize(vec3(-0.4, -0.65, 0.5))), 0.0);
+    let lee = smoothstep(-1.5, 4.0, slope.y);
+    let ripple_phase = phase * 170.0 + n.x * 4.0;
+    let ripple = sin(ripple_phase) * (1.0 - smoothstep(0.7, 2.8, fwidth(ripple_phase)));
+    let tint = mix(palette(0.15 + broad.y * 0.22 + height * 0.08), vec3(0.64, 0.48, 0.31), 0.3);
+    color = tint * (0.25 + 0.85 * sun) * (1.0 - 0.42 * lee) * (0.97 + ripple * 0.03);
+  } else if (u.options.x == 8u) {
+    // Thin-film interference inside softly lit, frosted mineral layers.
+    let p = (uv - 0.5) * vec2(u.controls.x, 1.0);
+    let layer = p.x * 1.7 + p.y * 0.95 + broad.x * 8.0 + n.y * 1.8;
+    let sheen = 0.5 + 0.5 * sin(layer * 6.2831853);
+    let interference = 0.5 + 0.5 * cos(vec3(0.0, 2.1, 4.2) + layer * 4.5 + broad.y * 3.0);
+    let pearl = mix(palette(0.48 + layer * 0.12), interference, 0.36);
+    let body = mix(pearl, vec3(0.68, 0.70, 0.72), 0.36);
+    let glaze = pow(sheen, 7.0) * 0.12;
+    let frost = (hash_cell(floor(screen_uv * vec2(1600.0, 1000.0))).x - 0.5) * 0.008;
+    color = body * (0.45 + 0.35 * sheen) + pearl * glaze + vec3(frost);
+  } else if (u.options.x == 9u) {
+    let p = (uv - 0.5) * vec2(u.controls.x, 1.0);
+    let drops = rain_layer(p, vec2(12.0, 6.0), vec2(0.0));
+    let small = rain_layer(p, vec2(23.0, 12.0), vec2(2.7, 9.2));
+    let refraction = (drops.xy + small.xy * 0.4) / vec2(u.controls.x, 1.0);
+    let wet = max(drops.w, small.w * 0.65);
+    color = rain_background(uv + refraction) * (1.0 - wet * 0.16)
+      + vec3(drops.z + small.z * 0.45);
   } else {
     let elevation = n.x * 0.9 + broad.y * 0.55;
     let levels = elevation * (240.0 / f32(max(u.options.z, 5u)));

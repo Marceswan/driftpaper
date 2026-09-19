@@ -18,6 +18,9 @@ The tests cover:
 - Fluid/noise resizing, refreshed bindings, shared program caches, and zero noise channels.
 - Batched simulation substeps versus separately submitted steps.
 - Pixel comparison of optimized line/endpoint shaders against the original shader fixtures.
+- Animation timing across speed tiers at 15 and 60 FPS, including the slower
+  Topography, Dunes, Opal, and Rain Glass base rates; frozen timestamps do not advance motion.
+- Stable numeric animation IDs and CLI selection of the new atmospheric modes.
 
 `release/scripts/package-macos.sh` creates the ZIP before GitHub artifact transfer,
 extracts it into a temporary directory, checks executable permissions, and validates
@@ -41,14 +44,40 @@ visually verified. Physical monitor hotplug and lock/unlock also need the checks
 
 ## Native platform checks
 
+Run the native regression harness from a logged-in desktop session:
+
+```sh
+# macOS (or set this environment variable in PowerShell on Windows)
+DRIFTPAPER_NATIVE_TESTS=1 cargo test --locked -p flux-desktop --test native_wallpaper
+```
+
+This creates temporary native windows and exercises the production window policy on
+the main thread. On macOS it checks the activation policy after the event loop starts,
+desktop level relative to icons, mouse passthrough flags, focus, Hide, Spaces, native
+minimize actions, repeated setup, and preservation of preview window behavior. On
+Windows it checks Explorer parenting, click-through/taskbar styles, native minimize
+commands, repeated setup, and preview isolation. It skips unless explicitly enabled
+because headless CI cannot reliably provide WindowServer or an Explorer desktop.
+
+On 2026-09-19, the native macOS harness passed, along with 23 core tests (Metal GPU
+required) and 16 desktop tests. Windows production code and the native harness passed
+cross-target compilation. A live Windows desktop is still required for the checks below.
+
 - macOS: right-click, control-click, and two-finger click on empty desktop should
   open Finder's desktop menu; left-click and drag desktop icons should work.
   Preview windows and the menu bar must remain interactive.
+- macOS: Show Desktop, Mission Control, switch Spaces, Hide/Hide Others, and minimize
+  ordinary apps. The wallpaper must remain in place and must not appear in the Dock
+  or Cmd-Tab. `--windowed` previews must remain focusable and minimizable.
 - macOS and Windows: connect, disconnect, reorder, and rotate monitors; move between
   Retina/scaled and unscaled screens. Remove all external monitors and reconnect.
 - Lock/unlock, sleep/wake, and display-only sleep should pause and resume animation
   without fast-forwarding. Waking a display must not override an inactive session.
 - On Windows, also check session reconnect and both Progman/WorkerW shell layouts.
+- Windows: right-click empty desktop, drag icons, Win-D twice, Win-M, and Task View.
+  The wallpaper must remain behind icons, without a taskbar or Alt-Tab entry. Restart
+  Explorer and confirm wallpaper recovery; quit from the tray. Check monitors left
+  of/above the primary display as well as mixed DPI arrangements.
 - Change every menu setting, including custom image palettes and FPS; resize or
   reconnect a monitor, quit, and relaunch. Cancel an image picker without changing
   the active theme. Preview should start with the saved appearance.
@@ -68,4 +97,7 @@ and uploading full pressure textures on the CPU. No percentage speedup or batter
 life improvement is claimed without controlled before/after measurements.
 
 Native APIs: [AppKit mouse pass-through](https://developer.apple.com/documentation/appkit/nswindow/ignoresmouseevents),
+[stationary desktop windows](https://developer.apple.com/documentation/appkit/nswindow/collectionbehavior-swift.struct/stationary),
+[Windows layered-window hit testing](https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows),
+[Windows parenting and styles](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setparent),
 [Windows display power notifications](https://learn.microsoft.com/en-us/windows/win32/power/power-setting-guids).

@@ -2,7 +2,7 @@
   <img width="100%" src="https://assets.sandydoo.me/flux/social-header-2022-07-07.webp" alt="DriftPaper" />
 
   <h1 align="center">DriftPaper</h1>
-  <p align="center"><b>A live wallpaper for macOS inspired by the Drift screensaver.</b></p>
+  <p align="center"><b>A live wallpaper for macOS and Windows inspired by the Drift screensaver.</b></p>
 </p>
 
 <br>
@@ -15,7 +15,7 @@ DriftPaper runs as a menu bar app, rendering a beautiful fluid simulation as you
 
 | Setting | Options |
 |---------|---------|
-| **Animation** | Drift, Flowing Silk, Ink in Water, Living Topography, Aurora Curtains, Pool Caustics, Liquid Metal |
+| **Animation** | Drift, Flowing Silk, Ink in Water, Living Topography, Aurora Curtains, Pool Caustics, Liquid Metal, Dunes, Opal, Rain Glass |
 | **Animation Speed** | Slow, Normal, Fast (independent of frame rate) |
 | **Color Scheme** | Original, Plasma, Poolside, Space Grey, Aurora, Ember, Deep Ocean, Rose Quartz, Moonlight, Custom Image |
 | **Density** | Sparse, Normal, Dense |
@@ -34,6 +34,8 @@ Additional options:
 
 - Renders behind all windows at desktop level
 - Click-through enabled - interact with your desktop normally
+- Desktop surfaces cannot be minimized, activated, or closed like application windows
+- Menu bar / system tray controls; wallpaper stays out of the Dock, taskbar, and app switcher
 - Multi-display support - one window per display, with live monitor connect/disconnect handling
 - Shared GPU devices and pipelines across compatible displays
 - Rendering pauses during display sleep and locked/inactive sessions
@@ -114,13 +116,17 @@ drift --help
 Options:
       --windowed     Run in normal window mode (not as wallpaper)
       --fps <FPS>    Override saved frame rate (1-240; default preference: 30)
-      --animation <ANIMATION>  drift, silk, ink, topography, aurora, caustics, metal
+      --animation <ANIMATION>  drift, silk, ink, topography, aurora, caustics, metal, dunes, opal, rain-glass
       --palette <PALETTE>      original, plasma, poolside, space-grey, aurora, ember, deep-ocean, rose-quartz, moonlight
       --speed <SPEED>          slow, normal, fast
   -h, --help         Print help
 ```
 
-On macOS, wallpaper windows ignore mouse input (including right-click) and cannot take keyboard focus, allowing desktop interaction through Finder.
+Wallpaper windows ignore mouse input (including right-click) and cannot take keyboard focus,
+leaving desktop interaction to Finder on macOS and Explorer on Windows. Quit using the menu
+bar or system tray. On macOS the wallpaper stays stationary across Spaces and Mission Control
+and remains visible during Hide/Hide Others. On Windows it attaches to Explorer's desktop;
+if that host is unavailable, DriftPaper retries instead of opening a floating window.
 
 By default, DriftPaper runs as a wallpaper. Use `--windowed` to run in a normal window for testing or preview.
 
@@ -145,6 +151,13 @@ Color Scheme, Brightness, Noise Strength, View Scale and Animation Speed apply
 across modes. Density controls Drift's line grid and Topography's contour spacing;
 Line Length and Line Width apply to Drift. Switching modes preserves these choices.
 Ink starts with fresh pigment when selected or when its simulation size changes.
+Living Topography runs at 60% of the previous animation rate at every speed tier.
+
+Dunes shades broad sand ridges with grazing light and fine ripples. Opal layers
+pearlescent color beneath a softly frosted surface. Rain Glass grows and slides
+droplets over defocused lights, with subtle refraction and highlights. All three
+have deliberately slow base motion; Slow, Normal, and Fast still scale their speed
+independently of frame rate. Palettes and custom colors remain available in each mode.
 
 Preview without changing saved preferences:
 
@@ -155,10 +168,13 @@ Preview without changing saved preferences:
 ./target/release/drift --windowed --animation aurora --palette aurora
 ./target/release/drift --windowed --animation caustics --palette deep-ocean
 ./target/release/drift --windowed --animation metal --palette moonlight
+./target/release/drift --windowed --animation dunes --palette ember
+./target/release/drift --windowed --animation opal --palette rose-quartz
+./target/release/drift --windowed --animation rain-glass --palette deep-ocean
 ```
 
-The new modes share cached GPU programs. Silk, Topography, Aurora, Caustics, and
-Metal skip fluid solving and line placement; Ink uses two dye textures capped at 1024 texels on the longest
+The new modes share cached GPU programs. Silk, Topography, Aurora, Caustics,
+Metal, Dunes, Opal, and Rain Glass skip fluid solving and line placement; Ink uses two dye textures capped at 1024 texels on the longest
 side. The existing sleep, frame-rate, and multi-display behavior applies to all modes.
 
 ## Credits

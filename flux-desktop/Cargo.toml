@@ -46,3 +46,9 @@ windows-sys = { version = "0.52", features = [
 winreg = "0.55"
 tray-icon = "0.19"
 muda = "0.15"
+
+# Native window APIs must be exercised on the process main thread.
+[[test]]
+name = "native_wallpaper"
+path = "tests/native_wallpaper.rs"
+harness = false

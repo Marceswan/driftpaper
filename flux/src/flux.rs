@@ -348,7 +348,8 @@ impl Flux {
             (0.001 * (timestamp - self.last_timestamp) as f32).max(0.0),
         );
 
-        let timestep = timestep * self.settings.animation_speed;
+        let timestep =
+            timestep * self.settings.animation_speed * self.settings.animation.motion_rate();
         self.last_timestamp = timestamp;
         self.elapsed_time += timestep;
         self.fluid_frame_time += timestep;
@@ -385,6 +386,7 @@ impl Flux {
                 &self.settings,
                 self.grid.aspect_ratio,
                 Default::default(),
+                self.elapsed_time,
             );
         } else {
             self.artwork = None;
@@ -506,6 +508,7 @@ impl Flux {
                             &self.settings,
                             self.grid.aspect_ratio,
                             view_transform,
+                            self.elapsed_time,
                         );
                         artwork.draw(&mut rpass);
                     } else {
@@ -559,6 +562,69 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gpu_atmospheric_timing_respects_speed_and_frame_rate() {
+        let Some((device, queue)) = crate::test_support::gpu() else {
+            return;
+        };
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let resources = Arc::new(SharedResources::new(&device));
+        for (animation, seconds_at_normal) in [
+            (settings::Animation::Silk, 1.0),
+            (settings::Animation::Topography, 0.6),
+            (settings::Animation::Dunes, 0.25),
+            (settings::Animation::Opal, 0.2),
+            (settings::Animation::RainGlass, 0.65),
+        ] {
+            for speed in [0.5, 1.0, 2.0] {
+                for fps in [15, 60] {
+                    let settings = Arc::new(Settings {
+                        animation,
+                        animation_speed: speed,
+                        fluid_size: 16,
+                        seed: Some("animation-clock".into()),
+                        ..Default::default()
+                    });
+                    let mut flux = Flux::new_with_resources(
+                        &device,
+                        &queue,
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        64,
+                        64,
+                        64,
+                        64,
+                        &settings,
+                        &resources,
+                    )
+                    .unwrap();
+                    for frame in 1..=fps {
+                        let mut encoder = device.create_command_encoder(&Default::default());
+                        flux.compute(
+                            &device,
+                            &queue,
+                            &mut encoder,
+                            1000.0 * frame as f64 / fps as f64,
+                        );
+                        queue.submit([encoder.finish()]);
+                    }
+                    assert!(
+                        (flux.elapsed_time - seconds_at_normal * speed).abs() < 0.00001,
+                        "{animation:?}, speed {speed}, {fps} FPS: {}",
+                        flux.elapsed_time
+                    );
+                    // Re-rendering settings without advancing time must not move the scene.
+                    let before = flux.elapsed_time;
+                    let mut encoder = device.create_command_encoder(&Default::default());
+                    flux.compute(&device, &queue, &mut encoder, 1000.0);
+                    queue.submit([encoder.finish()]);
+                    assert_eq!(flux.elapsed_time, before);
+                }
+            }
+        }
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert!(pollster::block_on(device.pop_error_scope()).is_none());
+    }
+
+    #[test]
     fn gpu_animation_modes_evolve_recolor_and_resize() {
         let Some((device, queue)) = crate::test_support::gpu() else {
             return;
@@ -600,6 +666,9 @@ mod tests {
                     settings::Animation::Aurora => settings::ColorPreset::Aurora,
                     settings::Animation::Caustics => settings::ColorPreset::DeepOcean,
                     settings::Animation::Metal => settings::ColorPreset::Moonlight,
+                    settings::Animation::Dunes => settings::ColorPreset::Ember,
+                    settings::Animation::Opal => settings::ColorPreset::RoseQuartz,
+                    settings::Animation::RainGlass => settings::ColorPreset::DeepOcean,
                     _ => settings::ColorPreset::Poolside,
                 });
             flux.update(&device, &queue, &settings);

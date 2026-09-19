@@ -155,18 +155,8 @@ async fn create_renderer(
     wallpaper: bool,
     settings: &Arc<Settings>,
 ) -> Result<DisplayRenderer> {
-    let mut builder = WindowBuilder::new()
-        .with_title("DriftPaper")
-        .with_visible(false)
-        .with_decorations(!wallpaper)
-        .with_resizable(!wallpaper)
-        .with_active(!wallpaper);
+    let mut builder = wallpaper::window_builder(wallpaper);
     if wallpaper {
-        #[cfg(target_os = "macos")]
-        {
-            use winit::platform::macos::WindowBuilderExtMacOS;
-            builder = builder.with_accepts_first_mouse(false);
-        }
         #[cfg(target_os = "macos")]
         {
             builder = builder.with_inner_size(LogicalSize::new(display.width, display.height));
@@ -176,7 +166,6 @@ async fn create_renderer(
             builder = builder
                 .with_inner_size(PhysicalSize::new(display.pixels_wide, display.pixels_high));
         }
-        builder = builder.with_window_level(WindowLevel::AlwaysOnBottom);
         // macOS positions are Cocoa coordinates and are set by setup_wallpaper_window.
         #[cfg(not(target_os = "macos"))]
         {
@@ -190,7 +179,7 @@ async fn create_renderer(
     }
     let window = Arc::new(builder.build(target)?);
     if wallpaper {
-        setup_wallpaper_window(&window, &display);
+        setup_wallpaper_window(&window, &display)?;
     }
     let surface = instance.create_surface(window.clone())?;
     let gpu = if let Some(gpu) = gpus
@@ -262,9 +251,10 @@ async fn create_renderer(
         settings,
         &gpu.resources,
     )?;
-    window.set_visible(true);
     if wallpaper {
-        setup_wallpaper_window(&window, &display);
+        wallpaper::show_wallpaper_window(&window);
+    } else {
+        window.set_visible(true);
     }
     Ok(DisplayRenderer {
         surface,
@@ -288,14 +278,24 @@ fn reconcile(
     let displays = get_all_displays();
     let current: Vec<_> = renderers.iter().map(|r| r.display.clone()).collect();
     let removed = displays::removed_displays(&current, &displays);
-    renderers.retain(|renderer| !removed.contains(&renderer.display.id.as_str()));
+    renderers.retain(|renderer| {
+        !removed.contains(&renderer.display.id.as_str())
+            && wallpaper::wallpaper_window_is_attached(&renderer.window)
+    });
     for display in displays {
-        if let Some(renderer) = renderers
-            .iter_mut()
-            .find(|renderer| renderer.display.id == display.id)
+        if let Some(index) = renderers
+            .iter()
+            .position(|renderer| renderer.display.id == display.id)
         {
+            let renderer = &mut renderers[index];
             if renderer.display != display {
-                setup_wallpaper_window(&renderer.window, &display);
+                if let Err(err) = setup_wallpaper_window(&renderer.window, &display) {
+                    log::warn!("Cannot update wallpaper attachment: {err}");
+                    // Drop a partially attached window; the next reconciliation retries.
+                    renderers.remove(index);
+                    continue;
+                }
+                wallpaper::show_wallpaper_window(&renderer.window);
                 renderer.display = display;
                 renderer.resize(renderer.window.inner_size());
             }
@@ -379,9 +379,12 @@ pub(crate) fn run(event_loop: EventLoop<UserEvent>, args: Args) -> Result<()> {
             Event::Suspended => suspended = true,
             Event::Resumed => { suspended = false; SCREEN_CONFIG_CHANGED.store(true, Ordering::SeqCst); }
             Event::WindowEvent { window_id, event } => {
-                if let Some(renderer) = renderers.iter_mut().find(|r| r.window.id() == window_id) {
+                if wallpaper && matches!(event, WindowEvent::Destroyed) {
+                    renderers.retain(|r| r.window.id() != window_id);
+                    SCREEN_CONFIG_CHANGED.store(true, Ordering::SeqCst);
+                } else if let Some(renderer) = renderers.iter_mut().find(|r| r.window.id() == window_id) {
                     match event {
-                        WindowEvent::CloseRequested => target.exit(),
+                        WindowEvent::CloseRequested if !wallpaper => target.exit(),
                         WindowEvent::KeyboardInput { event: KeyEvent { physical_key: PhysicalKey::Code(KeyCode::Escape | KeyCode::KeyQ), state: ElementState::Released, .. }, .. } if !wallpaper => target.exit(),
                         WindowEvent::Resized(size) => renderer.resize(size),
                         WindowEvent::ScaleFactorChanged { .. } => renderer.resize(renderer.window.inner_size()),

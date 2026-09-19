@@ -91,10 +91,13 @@ pub enum Animation {
     Aurora,
     Caustics,
     Metal,
+    Dunes,
+    Opal,
+    RainGlass,
 }
 
 impl Animation {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 10] = [
         Self::Drift,
         Self::Silk,
         Self::Ink,
@@ -102,8 +105,11 @@ impl Animation {
         Self::Aurora,
         Self::Caustics,
         Self::Metal,
+        Self::Dunes,
+        Self::Opal,
+        Self::RainGlass,
     ];
-    pub const LABELS: [&'static str; 7] = [
+    pub const LABELS: [&'static str; 10] = [
         "Drift",
         "Flowing Silk",
         "Ink in Water",
@@ -111,8 +117,11 @@ impl Animation {
         "Aurora Curtains",
         "Pool Caustics",
         "Liquid Metal",
+        "Dunes",
+        "Opal",
+        "Rain Glass",
     ];
-    pub const KEYS: [&'static str; 7] = [
+    pub const KEYS: [&'static str; 10] = [
         "drift",
         "silk",
         "ink",
@@ -120,10 +129,24 @@ impl Animation {
         "aurora",
         "caustics",
         "metal",
+        "dunes",
+        "opal",
+        "rain-glass",
     ];
 
     pub fn from_index(index: u32) -> Self {
         Self::ALL.get(index as usize).copied().unwrap_or_default()
+    }
+
+    /// Base pacing composes with Slow/Normal/Fast without changing saved tiers.
+    pub(crate) fn motion_rate(self) -> f32 {
+        match self {
+            Self::Topography => 0.6,
+            Self::Dunes => 0.25,
+            Self::Opal => 0.2,
+            Self::RainGlass => 0.65,
+            _ => 1.0,
+        }
     }
 }
 
@@ -156,6 +179,12 @@ impl Settings {
                     // Surface derivatives amplify small, high-frequency noise.
                     if index > 0 {
                         channel.multiplier *= 0.002;
+                    }
+                }
+                Animation::Dunes | Animation::Opal | Animation::RainGlass => {
+                    channel.scale *= 0.35;
+                    if index > 0 {
+                        channel.multiplier *= 0.015;
                     }
                 }
                 _ => {}
@@ -313,6 +342,30 @@ pub static COLOR_SCHEME_SPACE_GREY: [f32; 24] = [
 #[cfg(test)]
 mod animation_tests {
     use super::*;
+    #[test]
+    fn saved_animation_ids_still_select_the_same_modes() {
+        // Persisted numeric preferences must not change meaning when modes are appended.
+        for (id, name) in [
+            "Drift",
+            "Silk",
+            "Ink",
+            "Topography",
+            "Aurora",
+            "Caustics",
+            "Metal",
+            "Dunes",
+            "Opal",
+            "RainGlass",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let restored: Animation = serde_json::from_value(serde_json::json!(name)).unwrap();
+            assert_eq!(Animation::from_index(id as u32), restored);
+            assert_eq!(restored as usize, id);
+        }
+        assert_eq!(Animation::from_index(u32::MAX), Animation::Drift);
+    }
     #[test]
     fn old_settings_default_to_drift_and_normal_speed() {
         let settings: Settings = serde_json::from_str(r#"{"brightnessMultiplier":0.5}"#).unwrap();

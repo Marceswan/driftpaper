@@ -14,6 +14,7 @@ struct Uniforms {
     controls: [f32; 4],
     options: [u32; 4],
     viewport: [f32; 4],
+    motion: [f32; 4],
 }
 
 pub struct Context {
@@ -170,6 +171,7 @@ impl Context {
                 controls: [1.0; 4],
                 options: [0; 4],
                 viewport: [0.0, 0.0, 1.0, 1.0],
+                motion: [0.0; 4],
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -350,6 +352,7 @@ impl Context {
         settings: &Settings,
         aspect: f32,
         view: ViewTransform,
+        elapsed_time: f32,
     ) {
         let wheel = settings
             .color_mode
@@ -386,6 +389,7 @@ impl Context {
                 1.0 / view.scale[0],
                 1.0 / view.scale[1],
             ],
+            motion: [elapsed_time, 0.0, 0.0, 0.0],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }

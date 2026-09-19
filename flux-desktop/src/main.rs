@@ -7,6 +7,7 @@ mod platform;
 mod power;
 mod preferences;
 mod renderer;
+mod wallpaper;
 
 use clap::Parser;
 use displays::DisplayInfo;
@@ -16,7 +17,10 @@ use power::wake;
 use preferences::*;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use winit::window::{Window, WindowBuilder, WindowLevel};
+use wallpaper::setup_wallpaper_window;
+use winit::window::Window;
+#[cfg(target_os = "windows")]
+use winit::window::WindowBuilder;
 
 // Global flag to signal quit from menu bar
 static SHOULD_QUIT: AtomicBool = AtomicBool::new(false);
@@ -79,6 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = Args::parse();
     let mut builder = winit::event_loop::EventLoopBuilder::<power::UserEvent>::with_user_event();
+    wallpaper::configure_event_loop(&mut builder, !args.windowed);
     power::configure_event_loop(&mut builder);
     let event_loop = builder.build()?;
     power::install_proxy(event_loop.create_proxy());
@@ -136,6 +141,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn atmospheric_animation_previews_accept_every_speed_tier() {
+        for animation in ["dunes", "opal", "rain-glass"] {
+            for speed in ["slow", "normal", "fast"] {
+                let args = Args::try_parse_from([
+                    "drift",
+                    "--windowed",
+                    "--animation",
+                    animation,
+                    "--speed",
+                    speed,
+                ])
+                .unwrap();
+                assert_eq!(args.animation.as_deref(), Some(animation));
+                assert_eq!(args.speed.as_deref(), Some(speed));
+            }
+        }
+    }
     #[test]
     fn animation_preview_options_are_validated() {
         let args = Args::try_parse_from([
